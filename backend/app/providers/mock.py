@@ -30,7 +30,8 @@ class Persona:
 
 
 def _topic(text: str, words: int = 8) -> str:
-    cleaned = re.sub(r"\s+", " ", text).strip().rstrip("?.!")
+    without_commands = re.sub(r"/(error|long)\b", "", text)
+    cleaned = re.sub(r"\s+", " ", without_commands).strip().rstrip("?.!")
     parts = cleaned.split(" ")
     snippet = " ".join(parts[:words])
     return snippet + ("…" if len(parts) > words else "")

@@ -150,7 +150,7 @@ class Gateway:
             error = str(exc)
         pipeline.append(
             PipelineStep(
-                name=f"{adapter.provider} · {model.name}",
+                name=f"{model.name} via {adapter.provider}",
                 stage="provider",
                 duration_ms=int((time.perf_counter() - provider_start) * 1000),
                 detail=error or f"streamed {len(parts)} chunks",
