@@ -3,12 +3,14 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ShieldAlert } from 'lucide-react'
 
+import { SecretSpan, SecretsContext, markdownComponents } from '@/components/chat/CodeAndSecrets'
 import { InfoLine } from '@/components/chat/InfoLine'
 import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
 import { renderMarked } from '@/lib/marks'
 import { href } from '@/lib/route'
 import { remarkRestored } from '@/lib/remark-restored'
+import { SECRET_KINDS, secretsFrom } from '@/lib/secrets'
 import { cn, formatTokens } from '@/lib/utils'
 import type { ChatMessage, ModelInfo } from '@/lib/types'
 
@@ -30,10 +32,15 @@ function Reply({ m }: { m: ChatMessage }) {
     [m.marks, m.content],
   )
   const plugins = useMemo(() => [remarkGfm, remarkRestored(restored)], [restored])
+  const secrets = useMemo(() => secretsFrom(m.content, m.marks), [m.content, m.marks])
   return (
-    <div className={cn('prose-reply', m.streaming && 'streaming')}>
-      <Markdown remarkPlugins={plugins}>{m.content}</Markdown>
-    </div>
+    <SecretsContext.Provider value={secrets}>
+      <div className={cn('prose-reply', m.streaming && 'streaming')}>
+        <Markdown remarkPlugins={plugins} components={markdownComponents}>
+          {m.content}
+        </Markdown>
+      </div>
+    </SecretsContext.Provider>
   )
 }
 
@@ -91,7 +98,16 @@ export function MessageList({ messages, models, selectedId, onInspect, onContinu
                     blocked ? 'border border-dashed border-danger/50 bg-surface text-muted-foreground' : 'bg-muted',
                   )}
                 >
-                  {renderMarked(m.content, m.marks)}
+                  {renderMarked(m.content, m.marks, (f, value) =>
+                    SECRET_KINDS.has(f.kind) ? (
+                      <SecretSpan
+                        secret={{ value, kind: f.kind, placeholder: f.placeholder ?? '' }}
+                        className="border-0 bg-transparent px-0"
+                      />
+                    ) : (
+                      value
+                    ),
+                  )}
                 </div>
               )}
               {m.styles.length > 0 && (

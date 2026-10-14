@@ -65,6 +65,25 @@ def _body(topic: str, long: bool) -> str:
     return "\n".join(f"{i}. {p}" for i, p in enumerate(points, 1)) + extra
 
 
+def _code_with_key(ph: str) -> str:
+    """What a real model is told to write: the placeholder, exactly, inside code."""
+    return (
+        "Here's a working setup using your key:\n\n"
+        "```python\nfrom anthropic import Anthropic\n\n"
+        f'client = Anthropic(api_key="{ph}")\n'
+        'reply = client.messages.create(model="claude-haiku-5-5", max_tokens=200,\n'
+        '                               messages=[{"role": "user", "content": "Hello"}])\n'
+        "print(reply.content[0].text)\n```\n\n"
+        "Or test it straight from the terminal:\n\n"
+        "```bash\ncurl https://api.anthropic.com/v1/messages \\\n"
+        f"  -H 'x-api-key: {ph}' \\\n"
+        "  -H 'anthropic-version: 2023-06-01' \\\n"
+        "  -H 'content-type: application/json' \\\n"
+        """  -d '{"model": "claude-haiku-5-5", "max_tokens": 50, "messages": [{"role": "user", "content": "Hi"}]}'\n```\n\n"""
+        f"Keep `{ph}` out of version control: put it in a `.env` file instead."
+    )
+
+
 class MockAdapter:
     """One fake vendor. Implements the ProviderAdapter protocol."""
 
@@ -128,7 +147,8 @@ class MockAdapter:
         elif "table" in styles:
             body = TABLE
         elif "code" in styles:
-            body = CODE
+            key = next((p for p in placeholders if p.startswith(("[API_KEY_", "[AWS_ACCESS_KEY_"))), None)
+            body = _code_with_key(key) if key else CODE
         elif "bullets" in styles:
             body = "\n".join(f"- {s}" for s in STEPS)
         else:

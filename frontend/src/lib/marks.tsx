@@ -33,8 +33,15 @@ export function markTitle(f: Finding): string {
   return f.label
 }
 
-/** Split text into plain runs and marked runs, for highlighting findings in place. */
-export function renderMarked(text: string, marks: Finding[]): ReactNode[] {
+/**
+ * Split text into plain runs and marked runs, for highlighting findings in
+ * place. `renderValue` can replace a marked value's text (e.g. to mask secrets).
+ */
+export function renderMarked(
+  text: string,
+  marks: Finding[],
+  renderValue?: (finding: Finding, value: string) => ReactNode,
+): ReactNode[] {
   const spans = marks
     .filter((m) => m.start != null && m.end != null && m.end <= text.length)
     .sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
@@ -47,7 +54,7 @@ export function renderMarked(text: string, marks: Finding[]): ReactNode[] {
     if (s > cursor) out.push(text.slice(cursor, s))
     out.push(
       <mark key={i} className={cn(markClass(m.action), 'text-inherit')} title={markTitle(m)}>
-        {text.slice(s, e)}
+        {renderValue ? renderValue(m, text.slice(s, e)) : text.slice(s, e)}
       </mark>,
     )
     cursor = e

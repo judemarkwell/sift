@@ -9,6 +9,8 @@ import { useAppData } from '@/hooks/useAppData'
 import { ApiError, api } from '@/lib/api'
 import { compareStore, useLiveComparison } from '@/lib/compare-store'
 import { remarkRestored } from '@/lib/remark-restored'
+import { secretsFrom } from '@/lib/secrets'
+import { SecretsContext, markdownComponents } from '@/components/chat/CodeAndSecrets'
 import { href, navigate } from '@/lib/route'
 import { cn, formatCost, formatMs, formatTokens, relativeTime } from '@/lib/utils'
 import type { Comparison, ComparisonLane, ComparisonSummary, ModelInfo } from '@/lib/types'
@@ -284,6 +286,7 @@ function Lane({ lane: l, model: m, cheapest, fastest }: { lane: ComparisonLane; 
     [l.marks, l.content],
   )
   const plugins = useMemo(() => [remarkGfm, remarkRestored(restored)], [restored])
+  const secrets = useMemo(() => secretsFrom(l.content, l.marks), [l.content, l.marks])
   return (
     <article className="flex min-w-0 flex-col rounded-xl border border-border bg-surface">
       <header className="border-b border-border px-4 py-3">
@@ -313,7 +316,15 @@ function Lane({ lane: l, model: m, cheapest, fastest }: { lane: ComparisonLane; 
           <p className="text-sm text-danger">{l.error}</p>
         ) : (
           <div className={cn('prose-reply text-[14.5px]', l.status === 'running' && 'streaming')}>
-            {l.content ? <Markdown remarkPlugins={plugins}>{l.content}</Markdown> : <span className="caret" />}
+            {l.content ? (
+              <SecretsContext.Provider value={secrets}>
+                <Markdown remarkPlugins={plugins} components={markdownComponents}>
+                  {l.content}
+                </Markdown>
+              </SecretsContext.Provider>
+            ) : (
+              <span className="caret" />
+            )}
           </div>
         )}
       </div>

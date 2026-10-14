@@ -149,3 +149,35 @@ def test_key_length_is_checked_against_the_normal_length():
 
 def test_truncated_google_key_is_still_detected():
     assert kinds("key AIzaSyA1234567890abcdefghijkl") == ["API_KEY"]
+
+
+@pytest.mark.parametrize(
+    "chunks,expected",
+    [
+        # a key inside quotes in Python
+        (['```python\nclient = Anthropic(api_key="[API', '_KEY_1]")\n```'],
+         '```python\nclient = Anthropic(api_key="sk-ant-api03-REALKEYVALUE1234567890")\n```'),
+        # a .env line
+        (["```env\nANTHROPIC_API_KEY=[API_KEY_1]\n", "```"],
+         "```env\nANTHROPIC_API_KEY=sk-ant-api03-REALKEYVALUE1234567890\n```"),
+        # a curl header, split right after the bracket
+        (["curl -H 'x-api-key: [", "API_KEY_1]' https://api.anthropic.com"],
+         "curl -H 'x-api-key: sk-ant-api03-REALKEYVALUE1234567890' https://api.anthropic.com"),
+        # code full of brackets that aren't placeholders
+        (['keys = ["a", ', '"[API_KEY_1]"]\nvals = [x[0] for x in rows]'],
+         'keys = ["a", "sk-ant-api03-REALKEYVALUE1234567890"]\nvals = [x[0] for x in rows]'),
+    ],
+)
+def test_restores_placeholders_inside_code(chunks, expected):
+    vault = Vault()
+    vault.placeholder_for("API_KEY", "sk-ant-api03-REALKEYVALUE1234567890")
+    r = StreamRestorer(vault)
+    out = "".join(r.feed(c) for c in chunks) + r.flush()
+    assert out == expected
+    assert [out[s:e] for _, s, e in r.restored] == ["sk-ant-api03-REALKEYVALUE1234567890"]
+
+
+def test_model_is_told_to_keep_placeholders_exact_in_code():
+    from app.skills.pii.skill import PLACEHOLDER_NOTE
+
+    assert "inside code, config files and commands" in PLACEHOLDER_NOTE
