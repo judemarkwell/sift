@@ -5,7 +5,6 @@ import {
   Columns2,
   CreditCard,
   Lock,
-  LockKeyhole,
   Monitor,
   Moon,
   Plus,
@@ -15,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 
+import { LockIcon } from '@/components/LockIcon'
 import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
 import { href, navigate, type Route } from '@/lib/route'
@@ -96,7 +96,7 @@ function SecureFolder({ route, onClose }: { route: Route; onClose: () => void })
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
         >
           <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-90')} />
-          <LockKeyhole className="size-3.5 shrink-0 text-primary" />
+          <LockIcon open={expanded} className="size-3.5 shrink-0 text-primary" />
           <span className="font-medium">Secure</span>
           {!status.pin_set && <span className="text-xs text-muted-foreground">· set up</span>}
         </button>
