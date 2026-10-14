@@ -14,7 +14,7 @@ import asyncio
 import random
 import re
 from dataclasses import dataclass
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from app.providers.base import ProviderError
 from app.schema import AIRequest, Message, ModelInfo
@@ -98,21 +98,31 @@ class MockAdapter:
             else ""
         )
         model_name = next(m.name for m in self._models if m.id == request.model)
+        placeholders = list(dict.fromkeys(re.findall(r"\[[A-Z_]+_\d+\]", last_user)))
+        privacy = (
+            "\n\n**About your details:** I only received "
+            + ", ".join(placeholders)
+            + " rather than the real values, so I'll refer to them that way: for example, "
+            f"I'd send the follow-up to {placeholders[0]}."
+            if placeholders
+            else ""
+        )
         return (
-            f"{opener}\n\n{_body(topic, '/long' in last_user)}\n\n{closer}"
+            f"{opener}\n\n{_body(topic, '/long' in last_user)}{privacy}\n\n{closer}"
             f"{memory}\n\n— *{model_name}, mock response*"
         )
 
     async def stream(
-        self, request: AIRequest, sent_messages: list[Message]
+        self, request: AIRequest, sent_messages: list[Message], options: dict[str, Any]
     ) -> AsyncIterator[str]:
         text = self._compose(request, sent_messages)
         last_user = sent_messages[-1].content if sent_messages else ""
 
         await asyncio.sleep(random.randint(*self._first_token_ms) / 1000)
 
-        # Split into word-ish chunks, keeping whitespace, like real token streams.
-        chunks = re.findall(r"\S+\s*|\s+", text)
+        # Split into token-sized pieces, like real streams. Long words (and
+        # placeholders like [EMAIL_1]) get split across chunks on purpose.
+        chunks = re.findall(r"\S{1,6}\s*|\s+", text)
         fail_at = len(chunks) // 3 if "/error" in last_user else None
         for i, chunk in enumerate(chunks):
             if fail_at is not None and i == fail_at:

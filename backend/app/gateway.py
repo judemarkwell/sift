@@ -1,18 +1,20 @@
 """The gateway: one pipeline every request goes through.
 
-    pre-request   -> budget check, context assembly (later: PII redaction)
-    provider      -> the adapter streams the response
-    post-response -> usage + cost (later: provenance, evaluation)
+    pre-request skills   trim, redact, guard spend, request caching
+    provider             the adapter streams the reply (through output transformers)
+    post-response skills cost meter, cache report, reply check
 
-Each stage records a PipelineStep, so the trace shows exactly what happened.
+Each skill records a PipelineStep, so the trace shows exactly what happened,
+in order. A pre-request skill can block: the provider is never called and
+nothing is charged.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import AsyncIterator, Union
+from datetime import datetime, timedelta, timezone
+from typing import Any, AsyncIterator, Callable, Union
 
 from app.providers import ProviderAdapter, ProviderError
 from app.schema import (
@@ -21,15 +23,20 @@ from app.schema import (
     ContextBreakdown,
     ContextSegment,
     Cost,
+    Finding,
     Message,
     ModelInfo,
     PipelineStep,
+    Principal,
     Timing,
     Trace,
     Usage,
     new_id,
 )
-from app.store import TraceStore
+from app.skills.base import PipelineContext, Skill, StepResult
+from app.skills.pii.redactor import Vault
+from app.skills.registry import SKILLS, ResolvedSkill
+from app.storage.base import Storage
 from app.tokens import estimate_messages, estimate_tokens
 
 
@@ -46,6 +53,8 @@ class Started:
     trace_id: str
     model: ModelInfo
     context: ContextBreakdown
+    prompt_marks: list[Finding]
+    pipeline: list[PipelineStep]
 
 
 @dataclass
@@ -56,15 +65,23 @@ class Delta:
 @dataclass
 class Finished:
     trace: Trace
+    content: str  # what the user sees (placeholders restored)
+    reply_marks: list[Finding]
+    prompt_marks: list[Finding]
 
 
 @dataclass
 class Failed:
     message: str
     trace: Trace
+    content: str
+    prompt_marks: list[Finding]
+    blocked: bool = False
 
 
 GatewayEvent = Union[Started, Delta, Finished, Failed]
+SettingsResolver = Callable[[Principal], dict[str, ResolvedSkill]]
+Charger = Callable[[Trace, ModelInfo], float]
 
 
 @dataclass
@@ -75,183 +92,262 @@ class _Clock:
         return int((time.perf_counter() - self.start) * 1000)
 
 
-def price(model: ModelInfo, usage: Usage) -> Cost:
-    per = 1_000_000
-    inp = usage.input_tokens * model.input_price_per_mtok / per
-    out = usage.output_tokens * model.output_price_per_mtok / per
-    write_rate = model.cache_write_price_per_mtok or model.input_price_per_mtok
-    read_rate = model.cache_read_price_per_mtok or model.input_price_per_mtok
-    cache = (usage.cache_write_tokens * write_rate + usage.cache_read_tokens * read_rate) / per
-    return Cost(input_usd=inp, output_usd=out, cache_usd=cache, total_usd=inp + out + cache)
-
-
 class Gateway:
     def __init__(
         self,
-        store: TraceStore,
+        storage: Storage,
         adapters: list[ProviderAdapter],
+        settings_for: SettingsResolver,
+        charge: Charger | None = None,
         daily_budget_usd: float = 0.0,
+        skills: list[Skill] = SKILLS,
     ):
-        self.store = store
+        self.storage = storage
+        self.settings_for = settings_for
+        self.charge = charge
         self.daily_budget_usd = daily_budget_usd
+        self.skills = skills
         self._routes: dict[str, tuple[ProviderAdapter, ModelInfo]] = {
             m.id: (a, m) for a in adapters for m in a.models()
         }
 
+    # ---- models & platform budget ------------------------------------------------
+
     def models(self) -> list[ModelInfo]:
         return [m for _, m in self._routes.values()]
-
-    # ---- budget ------------------------------------------------------------
-
-    def spent_today(self) -> float:
-        today = datetime.now(timezone.utc).date()
-        return sum(
-            t.response.cost.total_usd
-            for t in self.store.all()
-            if t.created_at.date() == today
-            and self._routes.get(t.response.model, (None, None))[1] is not None
-            and self._routes[t.response.model][1].live
-        )
-
-    def check_budget(self, model: ModelInfo) -> None:
-        if not model.live or self.daily_budget_usd <= 0:
-            return
-        spent = self.spent_today()
-        if spent >= self.daily_budget_usd:
-            raise BudgetExceededError(
-                f"Today's spending limit of ${self.daily_budget_usd:.2f} has been reached "
-                f"(${spent:.4f} spent). Raise SIFT_DAILY_BUDGET_USD in backend/.env, "
-                "or switch to a mock model."
-            )
-
-    # ---- pipeline stages -------------------------------------------------
-
-    def _assemble_context(
-        self, request: AIRequest, model: ModelInfo
-    ) -> tuple[list[Message], ContextBreakdown]:
-        sent: list[Message] = []
-        if request.system:
-            sent.append(Message(role="system", content=request.system))
-        sent.extend(request.messages)
-
-        history, prompt = request.messages[:-1], request.messages[-1:]
-        segments = [
-            ContextSegment(
-                label="System instructions",
-                tokens=estimate_tokens(request.system or ""),
-            ),
-            ContextSegment(label="Conversation history", tokens=estimate_messages(history)),
-            ContextSegment(label="Your prompt", tokens=estimate_messages(prompt)),
-        ]
-        total = sum(s.tokens for s in segments)
-        return sent, ContextBreakdown(
-            segments=segments, total_tokens=total, window=model.context_window
-        )
-
-    # ---- main entry point --------------------------------------------------
 
     def resolve(self, model_id: str) -> tuple[ProviderAdapter, ModelInfo]:
         if model_id not in self._routes:
             raise UnknownModelError(f"Unknown model: {model_id}")
         return self._routes[model_id]
 
-    async def run(self, request: AIRequest) -> AsyncIterator[GatewayEvent]:
-        adapter, model = self.resolve(request.model)
-        clock = _Clock()
-        pipeline: list[PipelineStep] = []
+    def spent_today(self) -> float:
+        start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        live = {m.id for m in self.models() if m.live}
+        return self.storage.spend_since(start, live)
 
-        # pre-request
-        t = time.perf_counter()
-        sent, context = self._assemble_context(request, model)
-        pipeline.append(
-            PipelineStep(
-                name="Context assembly",
-                stage="pre-request",
-                duration_ms=int((time.perf_counter() - t) * 1000),
-                detail=f"{len(sent)} messages, ~{context.total_tokens:,} tokens "
-                f"({context.percent}% of {model.context_window:,})",
+    def check_budget(self, model: ModelInfo) -> None:
+        """Platform-wide safety cap, separate from each user's plan."""
+        if not model.live or self.daily_budget_usd <= 0:
+            return
+        spent = self.spent_today()
+        if spent >= self.daily_budget_usd:
+            tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%b %d")
+            raise BudgetExceededError(
+                f"Sift's daily spending cap of ${self.daily_budget_usd:.2f} has been reached. Real models "
+                f"are paused until {tomorrow} (UTC); mock models still work. To change the cap, set "
+                "SIFT_DAILY_BUDGET_USD in backend/.env."
             )
+
+    # ---- pipeline ----------------------------------------------------------------
+
+    async def _run_stage(
+        self,
+        ctx: PipelineContext,
+        settings: dict[str, ResolvedSkill],
+        stage: str,
+        steps: list[PipelineStep],
+    ) -> None:
+        for skill in self.skills:
+            m = skill.manifest
+            if stage not in m.stages:
+                continue
+            resolved = settings.get(m.id)
+            if resolved is None or not resolved.enabled:
+                continue
+            config = skill.Config(**resolved.config)
+            t = time.perf_counter()
+            try:
+                hook = skill.before if stage == "pre-request" else skill.after
+                result = await hook(ctx, config)
+            except Exception as exc:  # a broken skill must not take chat down
+                result = StepResult("error", f"Skill failed: {type(exc).__name__}")
+            if result is None:
+                continue
+            steps.append(
+                PipelineStep(
+                    name=m.name,
+                    stage=stage,  # type: ignore[arg-type]
+                    duration_ms=int((time.perf_counter() - t) * 1000),
+                    detail=result.detail,
+                    skill_id=m.id,
+                    status=result.status,
+                    findings=result.findings,
+                )
+            )
+            if ctx.blocked_reason:
+                return
+
+    @staticmethod
+    def _context(ctx: PipelineContext) -> ContextBreakdown:
+        convo = [m for m in ctx.messages if m.role != "system"]
+        history, prompt = convo[:-1], convo[-1:]
+        segments = [
+            ContextSegment(label="System instructions", tokens=estimate_tokens(ctx.system_prompt or "")),
+            ContextSegment(label="Conversation history", tokens=estimate_messages(history)),
+            ContextSegment(label="Your prompt", tokens=estimate_messages(prompt)),
+        ]
+        return ContextBreakdown(
+            segments=segments, total_tokens=sum(s.tokens for s in segments), window=ctx.model.context_window
         )
 
+    async def run(
+        self,
+        principal: Principal,
+        conversation_id: str,
+        model_id: str,
+        messages: list[Message],
+        *,
+        ephemeral: bool = False,
+        max_output_tokens: int = 1024,
+    ) -> AsyncIterator[GatewayEvent]:
+        adapter, model = self.resolve(model_id)
+        clock = _Clock()
+        settings = self.settings_for(principal)
+        vault = (
+            Vault()
+            if ephemeral
+            else Vault.from_dict(self.storage.get_vault(principal.org_id, conversation_id))
+        )
+        request = AIRequest(
+            org_id=principal.org_id,
+            user_id=principal.user_id,
+            conversation_id=conversation_id,
+            model=model.id,
+            messages=messages,
+            max_output_tokens=max_output_tokens,
+        )
+        ctx = PipelineContext(
+            principal=principal, request=request, model=model, messages=list(messages), vault=vault
+        )
+        steps: list[PipelineStep] = []
         trace_id = new_id("trace")
-        yield Started(trace_id=trace_id, model=model, context=context)
+
+        await self._run_stage(ctx, settings, "pre-request", steps)
+        if not ephemeral and vault.by_placeholder:
+            self.storage.put_vault(principal.org_id, conversation_id, vault.to_dict())
+        context = self._context(ctx)
+        sent = list(ctx.messages)
+        if ctx.system_prompt:
+            sent = [Message(role="system", content=ctx.system_prompt)] + [m for m in sent if m.role != "system"]
+
+        if ctx.blocked_reason:
+            trace = self._trace(trace_id, principal, conversation_id, model, adapter, sent, context, steps,
+                                content="", usage=Usage(), finish="blocked", ttft=0, clock=clock,
+                                ephemeral=ephemeral)
+            self.storage.put_trace(trace)
+            yield Failed(ctx.blocked_reason, trace, "", ctx.prompt_marks, blocked=True)
+            return
+
+        yield Started(trace_id, model, context, ctx.prompt_marks, list(steps))
 
         # provider
-        parts: list[str] = []
+        raw: list[str] = []
+        shown: list[str] = []
         reported: Usage | None = None
         ttft = 0
         provider_start = time.perf_counter()
-        error: str | None = None
+
+        def through(text: str) -> str:
+            for t in ctx.transformers:
+                text = t.feed(text)
+            return text
+
         try:
-            async for item in adapter.stream(request, sent):
+            async for item in adapter.stream(request, sent, ctx.provider_options):
                 if isinstance(item, Usage):
                     reported = item
                     continue
-                if not parts:
+                if not raw:
                     ttft = clock.ms()
-                parts.append(item)
-                yield Delta(text=item)
+                raw.append(item)
+                out = through(item)
+                if out:
+                    shown.append(out)
+                    yield Delta(out)
         except ProviderError as exc:
-            error = str(exc)
+            ctx.error = str(exc)
         except Exception as exc:  # never leak a stack trace to the user
-            error = f"Unexpected error from {adapter.provider}: {type(exc).__name__}"
-        pipeline.append(
+            ctx.error = f"Unexpected error from {adapter.provider}: {type(exc).__name__}"
+        # flush anything the transformers were holding back
+        tail = ""
+        for i, t in enumerate(ctx.transformers):
+            flushed = t.flush()
+            for later in ctx.transformers[i + 1 :]:
+                flushed = later.feed(flushed)
+            tail += flushed
+        if tail:
+            shown.append(tail)
+            yield Delta(tail)
+
+        steps.append(
             PipelineStep(
                 name=f"{model.name} via {adapter.provider}",
                 stage="provider",
                 duration_ms=int((time.perf_counter() - provider_start) * 1000),
-                detail=error or f"streamed {len(parts)} chunks",
+                detail=ctx.error or f"Streamed {len(raw)} chunks",
+                status="error" if ctx.error else "ok",
             )
         )
 
-        # post-response
-        t = time.perf_counter()
-        content = "".join(parts)
-        usage = reported or Usage(
-            input_tokens=context.total_tokens,
-            output_tokens=estimate_tokens(content),
-            estimated=True,
-        )
-        if error and reported is None and model.live:
-            # The provider failed before reporting usage. Rejected requests
-            # aren't billed, so don't show an invented cost.
-            usage = Usage(estimated=True)
-        cost = price(model, usage)
-        cache_note = ""
-        if usage.cache_read_tokens or usage.cache_write_tokens:
-            cache_note = (
-                f"; cache read {usage.cache_read_tokens:,}, "
-                f"cache write {usage.cache_write_tokens:,} tokens"
+        ctx.raw_output = "".join(raw)
+        if ctx.error and reported is None and model.live:
+            # Failed before usage was reported: rejected requests aren't billed.
+            ctx.usage = Usage(estimated=True)
+        else:
+            ctx.usage = reported or Usage(
+                input_tokens=context.total_tokens,
+                output_tokens=estimate_tokens(ctx.raw_output),
+                estimated=True,
             )
-        pipeline.append(
-            PipelineStep(
-                name="Cost calculator",
-                stage="post-response",
-                duration_ms=int((time.perf_counter() - t) * 1000),
-                detail=f"${cost.total_usd:.6f} from "
-                f"{'provider-reported' if not usage.estimated else 'estimated'} usage"
-                f"{cache_note}",
-            )
-        )
+        await self._run_stage(ctx, settings, "post-response", steps)
 
-        trace = Trace(
+        content = "".join(shown)
+        trace = self._trace(trace_id, principal, conversation_id, model, adapter, sent, context, steps,
+                            content=ctx.raw_output, usage=ctx.usage, finish="error" if ctx.error else "stop",
+                            ttft=ttft, clock=clock, ephemeral=ephemeral)
+        if ctx.cost is not None:
+            trace.response.cost = ctx.cost
+        if self.charge:
+            trace.charged_usd = self.charge(trace, model)
+        self.storage.put_trace(trace)
+
+        reply_marks: list[Finding] = []
+        for t in ctx.transformers:
+            for ph, start, end in getattr(t, "restored", []):
+                kind = ph.strip("[]").rsplit("_", 1)[0]
+                reply_marks.append(
+                    Finding(kind=kind, label="Restored from placeholder", action="redact",
+                            placeholder=ph, start=start, end=end)
+                )
+        if ctx.error:
+            yield Failed(ctx.error, trace, content, ctx.prompt_marks)
+        else:
+            yield Finished(trace, content, reply_marks, ctx.prompt_marks)
+
+    def _trace(
+        self, trace_id: str, principal: Principal, conversation_id: str, model: ModelInfo,
+        adapter: ProviderAdapter, sent: list[Message], context: ContextBreakdown,
+        steps: list[PipelineStep], *, content: str, usage: Usage, finish: Any, ttft: int,
+        clock: _Clock, ephemeral: bool,
+    ) -> Trace:
+        return Trace(
             id=trace_id,
-            org_id=request.org_id,
-            user_id=request.user_id,
-            conversation_id=request.conversation_id,
-            request=request,
+            org_id=principal.org_id,
+            user_id=principal.user_id,
+            conversation_id=conversation_id,
+            model=model.id,
             sent_messages=sent,
             response=AIResponse(
                 model=model.id,
                 provider=adapter.provider,
                 content=content,
-                finish_reason="error" if error else "stop",
+                finish_reason=finish,
                 usage=usage,
-                cost=cost,
+                cost=Cost(),
                 timing=Timing(time_to_first_token_ms=ttft, total_ms=clock.ms()),
             ),
             context=context,
-            pipeline=pipeline,
+            pipeline=steps,
+            ephemeral=ephemeral,
         )
-        self.store.put(trace)
-        yield Failed(message=error, trace=trace) if error else Finished(trace=trace)

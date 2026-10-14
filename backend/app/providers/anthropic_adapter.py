@@ -10,7 +10,7 @@ Prices are from https://platform.claude.com/docs/en/about-claude/pricing
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import anthropic
 
@@ -70,7 +70,7 @@ class AnthropicAdapter:
         return MODELS
 
     async def stream(
-        self, request: AIRequest, sent_messages: list[Message]
+        self, request: AIRequest, sent_messages: list[Message], options: dict[str, Any]
     ) -> AsyncIterator[StreamItem]:
         system = "\n\n".join(m.content for m in sent_messages if m.role == "system")
         messages = [
@@ -82,10 +82,11 @@ class AnthropicAdapter:
             "model": request.model,
             "max_tokens": min(request.max_output_tokens, self._max_output_tokens),
             "messages": messages,
+        }
+        if options.get("prompt_cache"):
             # Automatic prompt caching: the API caches the longest reusable
             # prefix, so long conversations get cheaper on later turns.
-            "cache_control": {"type": "ephemeral"},
-        }
+            kwargs["cache_control"] = {"type": "ephemeral"}
         if system:
             kwargs["system"] = system
 

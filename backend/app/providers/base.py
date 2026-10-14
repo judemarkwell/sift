@@ -6,7 +6,7 @@ interface, so the gateway and UI never change.
 
 from __future__ import annotations
 
-from typing import AsyncIterator, Protocol, Union
+from typing import Any, AsyncIterator, Protocol, Union
 
 from app.schema import AIRequest, Message, ModelInfo, Usage
 
@@ -26,5 +26,8 @@ class ProviderAdapter(Protocol):
     def models(self) -> list[ModelInfo]: ...
 
     def stream(
-        self, request: AIRequest, sent_messages: list[Message]
-    ) -> AsyncIterator[StreamItem]: ...
+        self, request: AIRequest, sent_messages: list[Message], options: dict[str, Any]
+    ) -> AsyncIterator[StreamItem]:
+        """`sent_messages` is final (after skills; any system prompt first).
+        `options` carries skill hints such as {"prompt_cache": True}."""
+        ...
