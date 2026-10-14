@@ -16,7 +16,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.gateway import Delta, Failed, Finished, Gateway, Started, UnknownModelError
+from app.config import settings
+from app.gateway import (
+    BudgetExceededError,
+    Delta,
+    Failed,
+    Finished,
+    Gateway,
+    Started,
+    UnknownModelError,
+)
+from app.providers import build_adapters
 from app.schema import AIRequest, ModelInfo, Trace
 from app.store import InMemoryTraceStore
 
@@ -31,7 +41,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-gateway = Gateway(store=InMemoryTraceStore())
+gateway = Gateway(
+    store=InMemoryTraceStore(),
+    adapters=build_adapters(),
+    daily_budget_usd=settings.daily_budget_usd,
+)
 
 
 def _sse(event: str, data: object) -> str:
@@ -41,6 +55,14 @@ def _sse(event: str, data: object) -> str:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/budget")
+def budget() -> dict[str, float]:
+    return {
+        "daily_budget_usd": settings.daily_budget_usd,
+        "spent_today_usd": round(gateway.spent_today(), 6),
+    }
 
 
 @app.get("/api/models", response_model=list[ModelInfo])
@@ -53,8 +75,13 @@ async def chat_stream(request: AIRequest) -> StreamingResponse:
     if not request.messages or request.messages[-1].role != "user":
         raise HTTPException(400, "The last message must be from the user.")
     request.org_id = LOCAL_ORG
-    if request.model not in {m.id for m in gateway.models()}:
-        raise HTTPException(404, f"Unknown model: {request.model}")
+    try:
+        _, model = gateway.resolve(request.model)
+        gateway.check_budget(model)
+    except UnknownModelError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except BudgetExceededError as exc:
+        raise HTTPException(402, str(exc)) from exc
 
     async def events():
         try:

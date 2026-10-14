@@ -18,6 +18,8 @@ class TraceStore(Protocol):
 
     def list(self, org_id: str, conversation_id: str | None = None) -> list[Trace]: ...
 
+    def all(self) -> list[Trace]: ...
+
 
 class InMemoryTraceStore:
     def __init__(self) -> None:
@@ -38,3 +40,6 @@ class InMemoryTraceStore:
             if t.org_id == org_id
             and (conversation_id is None or t.conversation_id == conversation_id)
         ]
+
+    def all(self) -> list[Trace]:
+        return list(self._traces.values())

@@ -74,8 +74,9 @@ export function MessageList({ messages, models, selectedTraceId, onInspect, onSu
             )}
             {m.status === 'error' && (
               <p role="alert" className="mt-3 rounded-md border border-danger/40 px-3 py-2 text-sm text-danger">
-                The reply stopped partway: {m.error?.replace(/\.$/, '')}. Send your message again, or switch to another
-                model.
+                {m.content
+                  ? `The reply stopped partway: ${m.error?.replace(/\.$/, '')}. Send your message again, or switch to another model.`
+                  : m.error}
               </p>
             )}
             <InfoLine

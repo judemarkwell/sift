@@ -1,8 +1,8 @@
 """The gateway: one pipeline every request goes through.
 
-    pre-request  -> context assembly (later: PII redaction, policy checks)
-    provider     -> the adapter streams the response
-    post-response-> usage + cost (later: provenance, evaluation)
+    pre-request   -> budget check, context assembly (later: PII redaction)
+    provider      -> the adapter streams the response
+    post-response -> usage + cost (later: provenance, evaluation)
 
 Each stage records a PipelineStep, so the trace shows exactly what happened.
 """
@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import AsyncIterator, Union
 
-from app.providers import ADAPTERS, ProviderAdapter
+from app.providers import ProviderAdapter, ProviderError
 from app.schema import (
     AIRequest,
     AIResponse,
@@ -33,6 +34,10 @@ from app.tokens import estimate_messages, estimate_tokens
 
 
 class UnknownModelError(ValueError):
+    pass
+
+
+class BudgetExceededError(RuntimeError):
     pass
 
 
@@ -70,15 +75,54 @@ class _Clock:
         return int((time.perf_counter() - self.start) * 1000)
 
 
+def price(model: ModelInfo, usage: Usage) -> Cost:
+    per = 1_000_000
+    inp = usage.input_tokens * model.input_price_per_mtok / per
+    out = usage.output_tokens * model.output_price_per_mtok / per
+    write_rate = model.cache_write_price_per_mtok or model.input_price_per_mtok
+    read_rate = model.cache_read_price_per_mtok or model.input_price_per_mtok
+    cache = (usage.cache_write_tokens * write_rate + usage.cache_read_tokens * read_rate) / per
+    return Cost(input_usd=inp, output_usd=out, cache_usd=cache, total_usd=inp + out + cache)
+
+
 class Gateway:
-    def __init__(self, store: TraceStore, adapters: list[ProviderAdapter] = ADAPTERS):
+    def __init__(
+        self,
+        store: TraceStore,
+        adapters: list[ProviderAdapter],
+        daily_budget_usd: float = 0.0,
+    ):
         self.store = store
+        self.daily_budget_usd = daily_budget_usd
         self._routes: dict[str, tuple[ProviderAdapter, ModelInfo]] = {
             m.id: (a, m) for a in adapters for m in a.models()
         }
 
     def models(self) -> list[ModelInfo]:
         return [m for _, m in self._routes.values()]
+
+    # ---- budget ------------------------------------------------------------
+
+    def spent_today(self) -> float:
+        today = datetime.now(timezone.utc).date()
+        return sum(
+            t.response.cost.total_usd
+            for t in self.store.all()
+            if t.created_at.date() == today
+            and self._routes.get(t.response.model, (None, None))[1] is not None
+            and self._routes[t.response.model][1].live
+        )
+
+    def check_budget(self, model: ModelInfo) -> None:
+        if not model.live or self.daily_budget_usd <= 0:
+            return
+        spent = self.spent_today()
+        if spent >= self.daily_budget_usd:
+            raise BudgetExceededError(
+                f"Today's spending limit of ${self.daily_budget_usd:.2f} has been reached "
+                f"(${spent:.4f} spent). Raise SIFT_DAILY_BUDGET_USD in backend/.env, "
+                "or switch to a mock model."
+            )
 
     # ---- pipeline stages -------------------------------------------------
 
@@ -104,18 +148,15 @@ class Gateway:
             segments=segments, total_tokens=total, window=model.context_window
         )
 
-    @staticmethod
-    def _price(model: ModelInfo, usage: Usage) -> Cost:
-        inp = usage.input_tokens * model.input_price_per_mtok / 1_000_000
-        out = usage.output_tokens * model.output_price_per_mtok / 1_000_000
-        return Cost(input_usd=inp, output_usd=out, total_usd=inp + out)
-
     # ---- main entry point --------------------------------------------------
 
+    def resolve(self, model_id: str) -> tuple[ProviderAdapter, ModelInfo]:
+        if model_id not in self._routes:
+            raise UnknownModelError(f"Unknown model: {model_id}")
+        return self._routes[model_id]
+
     async def run(self, request: AIRequest) -> AsyncIterator[GatewayEvent]:
-        if request.model not in self._routes:
-            raise UnknownModelError(f"Unknown model: {request.model}")
-        adapter, model = self._routes[request.model]
+        adapter, model = self.resolve(request.model)
         clock = _Clock()
         pipeline: list[PipelineStep] = []
 
@@ -137,17 +178,23 @@ class Gateway:
 
         # provider
         parts: list[str] = []
+        reported: Usage | None = None
         ttft = 0
         provider_start = time.perf_counter()
         error: str | None = None
         try:
-            async for chunk in adapter.stream(request, sent):
+            async for item in adapter.stream(request, sent):
+                if isinstance(item, Usage):
+                    reported = item
+                    continue
                 if not parts:
                     ttft = clock.ms()
-                parts.append(chunk)
-                yield Delta(text=chunk)
-        except Exception as exc:  # adapters raise provider errors here
+                parts.append(item)
+                yield Delta(text=item)
+        except ProviderError as exc:
             error = str(exc)
+        except Exception as exc:  # never leak a stack trace to the user
+            error = f"Unexpected error from {adapter.provider}: {type(exc).__name__}"
         pipeline.append(
             PipelineStep(
                 name=f"{model.name} via {adapter.provider}",
@@ -160,19 +207,30 @@ class Gateway:
         # post-response
         t = time.perf_counter()
         content = "".join(parts)
-        usage = Usage(
+        usage = reported or Usage(
             input_tokens=context.total_tokens,
             output_tokens=estimate_tokens(content),
             estimated=True,
         )
-        cost = self._price(model, usage)
+        if error and reported is None and model.live:
+            # The provider failed before reporting usage. Rejected requests
+            # aren't billed, so don't show an invented cost.
+            usage = Usage(estimated=True)
+        cost = price(model, usage)
+        cache_note = ""
+        if usage.cache_read_tokens or usage.cache_write_tokens:
+            cache_note = (
+                f"; cache read {usage.cache_read_tokens:,}, "
+                f"cache write {usage.cache_write_tokens:,} tokens"
+            )
         pipeline.append(
             PipelineStep(
                 name="Cost calculator",
                 stage="post-response",
                 duration_ms=int((time.perf_counter() - t) * 1000),
-                detail=f"${cost.total_usd:.6f} at ${model.input_price_per_mtok}/"
-                f"${model.output_price_per_mtok} per 1M in/out",
+                detail=f"${cost.total_usd:.6f} from "
+                f"{'provider-reported' if not usage.estimated else 'estimated'} usage"
+                f"{cache_note}",
             )
         )
 

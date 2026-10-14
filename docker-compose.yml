@@ -2,6 +2,11 @@ services:
   api:
     build: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # Your API key lives in backend/.env (git-ignored). Optional, so the app
+    # still starts with mock models only.
+    env_file:
+      - path: ./backend/.env
+        required: false
     volumes:
       - ./backend/app:/app/app
     ports:

@@ -22,7 +22,13 @@ npm install
 npm run dev
 ```
 
-Or run both with Docker: `docker compose up`.
+Or run both with Docker: `docker compose up --build`.
+
+### Real Claude models
+
+Copy `backend/.env.example` to `backend/.env` and set `ANTHROPIC_API_KEY`. Restart the backend and Claude Haiku, Sonnet and Opus 5.5 appear at the top of the model picker, next to the free mocks. `.env` is git-ignored.
+
+Real replies show exact token counts (including prompt-cache reads) as reported by Anthropic. `SIFT_DAILY_BUDGET_USD` (default $2) is a hard daily spending cap across all users; once it's reached, real models are refused until the next UTC day and the mocks keep working.
 
 The Vite dev server forwards `/api/*` to the backend, so the browser only talks to one origin.
 
@@ -62,8 +68,8 @@ backend/   FastAPI
 
 ## Next steps
 
-1. Real provider adapter (OpenAI or Bedrock) next to the mocks, with keys in `backend/.env`
+1. Second real provider (OpenAI or Bedrock) next to Anthropic
 2. Plugin interface, then PII redaction (pre-request) and replacing the built-in cost step with a plugin
-3. Use provider-reported token usage instead of estimates
+3. Per-user usage limits and credit balances (groundwork for paid plans)
 4. Persist conversations (SQLite or DynamoDB Local)
 5. AWS: Fargate, DynamoDB, Cognito, Secrets Manager via CDK in `infra/`

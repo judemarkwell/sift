@@ -99,7 +99,9 @@ export function Composer({ messages, model, isStreaming, prefill, onPrefillUsed,
         </div>
       </div>
       <p className="mt-2 text-center text-[11.5px] text-muted-foreground">
-        Mock models only. Replies are simulated and cost nothing.
+        {model?.live
+          ? `${model.name} is a real model. Each message is billed to the Sift account.`
+          : 'Mock model. Replies are simulated and cost nothing.'}
       </p>
     </div>
   )

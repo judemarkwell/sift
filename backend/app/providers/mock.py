@@ -16,11 +16,8 @@ import re
 from dataclasses import dataclass
 from typing import AsyncIterator
 
+from app.providers.base import ProviderError
 from app.schema import AIRequest, Message, ModelInfo
-
-
-class MockProviderError(RuntimeError):
-    pass
 
 
 @dataclass
@@ -119,7 +116,7 @@ class MockAdapter:
         fail_at = len(chunks) // 3 if "/error" in last_user else None
         for i, chunk in enumerate(chunks):
             if fail_at is not None and i == fail_at:
-                raise MockProviderError(
+                raise ProviderError(
                     f"{self.provider} returned 529 overloaded (simulated)"
                 )
             yield chunk

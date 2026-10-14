@@ -1,14 +1,23 @@
 """The adapter contract every provider implements.
 
-Real adapters (OpenAI, Anthropic via Bedrock, Gemini, Sign in with ChatGPT)
-will implement this same interface, so the gateway and UI never change.
+Real adapters (Anthropic, OpenAI, Bedrock, Gemini...) implement this same
+interface, so the gateway and UI never change.
 """
 
 from __future__ import annotations
 
-from typing import AsyncIterator, Protocol
+from typing import AsyncIterator, Protocol, Union
 
-from app.schema import AIRequest, Message, ModelInfo
+from app.schema import AIRequest, Message, ModelInfo, Usage
+
+# An adapter streams text chunks. Real providers also yield one Usage object
+# (usually at the end) with the provider-reported token counts, which replace
+# the gateway's estimates.
+StreamItem = Union[str, Usage]
+
+
+class ProviderError(RuntimeError):
+    """A provider failed. The message is shown to the user, so keep it plain."""
 
 
 class ProviderAdapter(Protocol):
@@ -18,6 +27,4 @@ class ProviderAdapter(Protocol):
 
     def stream(
         self, request: AIRequest, sent_messages: list[Message]
-    ) -> AsyncIterator[str]:
-        """Yield response text chunks as they arrive."""
-        ...
+    ) -> AsyncIterator[StreamItem]: ...

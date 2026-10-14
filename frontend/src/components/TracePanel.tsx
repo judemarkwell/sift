@@ -104,6 +104,8 @@ export function TracePanel({ message, model, onClose }: Props) {
   if (!trace) return null
   const r = trace.response
   const ctx = trace.context
+  const est = r.usage.estimated
+  const tilde = est ? '~' : ''
 
   return (
     <aside
@@ -124,11 +126,23 @@ export function TracePanel({ message, model, onClose }: Props) {
 
       <div className="flex-1 overflow-y-auto">
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-5 pb-5">
-          <Figure label="Estimated cost" value={formatCost(r.cost.total_usd)} tone="cost" />
+          <Figure label={est ? 'Estimated cost' : 'Cost'} value={formatCost(r.cost.total_usd)} tone="cost" />
           <Figure label="Total time" value={formatMs(r.timing.total_ms)} />
-          <Figure label="Tokens in / out" value={`~${formatTokens(r.usage.input_tokens)} / ~${formatTokens(r.usage.output_tokens)}`} />
+          <Figure
+            label="Tokens in / out"
+            value={`${tilde}${formatTokens(r.usage.total_input_tokens)} / ${tilde}${formatTokens(r.usage.output_tokens)}`}
+          />
           <Figure label="First token after" value={formatMs(r.timing.time_to_first_token_ms)} />
         </dl>
+        <p className="-mt-2 px-5 pb-5 text-xs leading-relaxed text-muted-foreground">
+          {est
+            ? 'Mock model: token counts and cost are estimates. Nothing was charged.'
+            : `Counts reported by ${r.provider}.${
+                r.usage.cache_read_tokens
+                  ? ` ${formatTokens(r.usage.cache_read_tokens)} input tokens came from the prompt cache at a lower rate.`
+                  : ''
+              }`}
+        </p>
 
         <Section title="How this request was handled">
           <Sieve trace={trace} />

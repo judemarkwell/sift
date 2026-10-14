@@ -36,7 +36,10 @@ class ModelInfo(BaseModel):
     context_window: int
     input_price_per_mtok: float = Field(description="USD per 1M input tokens")
     output_price_per_mtok: float = Field(description="USD per 1M output tokens")
+    cache_write_price_per_mtok: float | None = None
+    cache_read_price_per_mtok: float | None = None
     description: str = ""
+    live: bool = Field(default=False, description="True for real providers that cost money")
 
 
 class AIRequest(BaseModel):
@@ -53,14 +56,22 @@ class AIRequest(BaseModel):
 
 
 class Usage(BaseModel):
-    input_tokens: int = 0
+    input_tokens: int = 0  # uncached input tokens
     output_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
     estimated: bool = True  # true until a real provider reports usage
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total_input_tokens(self) -> int:
+        return self.input_tokens + self.cache_write_tokens + self.cache_read_tokens
 
 
 class Cost(BaseModel):
     input_usd: float = 0.0
     output_usd: float = 0.0
+    cache_usd: float = 0.0
     total_usd: float = 0.0
 
 

@@ -19,7 +19,8 @@ interface Props {
 }
 
 export function ModelPicker({ models, value, onChange, disabled }: Props) {
-  const providers = [...new Set(models.map((m) => m.provider))]
+  // Real providers first, then the free mocks.
+  const providers = [...new Set([...models].sort((a, b) => Number(b.live) - Number(a.live)).map((m) => m.provider))]
 
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
@@ -37,8 +38,9 @@ export function ModelPicker({ models, value, onChange, disabled }: Props) {
                   <div className="flex flex-col gap-0.5">
                     <SelectItemText>{m.name}</SelectItemText>
                     <span className="text-xs text-muted-foreground">
-                      ${m.input_price_per_mtok} in, ${m.output_price_per_mtok} out per 1M tokens.{' '}
-                      {formatTokens(m.context_window)} context.
+                      {m.live
+                        ? `$${m.input_price_per_mtok} in, $${m.output_price_per_mtok} out per 1M tokens. ${formatTokens(m.context_window)} context.`
+                        : `Free mock. Simulates $${m.input_price_per_mtok} / $${m.output_price_per_mtok} per 1M tokens.`}
                     </span>
                   </div>
                 </SelectItem>

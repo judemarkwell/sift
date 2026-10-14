@@ -21,7 +21,9 @@ export function useChat() {
     fetchModels()
       .then((list) => {
         setModels(list)
-        const first = newConversation(list[0]?.id ?? '')
+        // Default to the cheapest real model when one is configured.
+        const live = list.filter((m) => m.live).sort((a, b) => a.input_price_per_mtok - b.input_price_per_mtok)
+        const first = newConversation(live[0]?.id ?? list[0]?.id ?? '')
         setConversations([first])
         setActiveId(first.id)
       })

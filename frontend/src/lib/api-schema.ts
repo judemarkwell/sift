@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Budget */
+        get: operations["budget_api_budget_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models": {
         parameters: {
             query?: never;
@@ -174,6 +191,11 @@ export interface components {
              */
             output_usd: number;
             /**
+             * Cache Usd
+             * @default 0
+             */
+            cache_usd: number;
+            /**
              * Total Usd
              * @default 0
              */
@@ -214,11 +236,21 @@ export interface components {
              * @description USD per 1M output tokens
              */
             output_price_per_mtok: number;
+            /** Cache Write Price Per Mtok */
+            cache_write_price_per_mtok?: number | null;
+            /** Cache Read Price Per Mtok */
+            cache_read_price_per_mtok?: number | null;
             /**
              * Description
              * @default
              */
             description: string;
+            /**
+             * Live
+             * @description True for real providers that cost money
+             * @default false
+             */
+            live: boolean;
         };
         /**
          * PipelineStep
@@ -297,10 +329,22 @@ export interface components {
              */
             output_tokens: number;
             /**
+             * Cache Write Tokens
+             * @default 0
+             */
+            cache_write_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
              * Estimated
              * @default true
              */
             estimated: boolean;
+            /** Total Input Tokens */
+            readonly total_input_tokens: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -341,6 +385,28 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
+    budget_api_budget_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
                     };
                 };
             };

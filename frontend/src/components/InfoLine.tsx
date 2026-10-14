@@ -13,6 +13,7 @@ interface Props {
 /** The quiet line under every reply: what it cost and how long it took. Click to see the full trace. */
 export function InfoLine({ message, model, selected, onInspect }: Props) {
   const r = message.trace?.response
+  const t = r?.usage.estimated ? '~' : ''
   const name = model?.name ?? message.modelId
 
   let summary: ReactNode
@@ -22,9 +23,15 @@ export function InfoLine({ message, model, selected, onInspect }: Props) {
     summary = (
       <>
         <span className="text-ink/80">{name}</span>
-        <span title="Input tokens (estimated)">~{formatTokens(r.usage.input_tokens)} in</span>
-        <span title="Output tokens (estimated)">~{formatTokens(r.usage.output_tokens)} out</span>
-        <span className="text-cost" title="Estimated cost">
+        <span>
+          {t}
+          {formatTokens(r.usage.total_input_tokens)} in
+        </span>
+        <span>
+          {t}
+          {formatTokens(r.usage.output_tokens)} out
+        </span>
+        <span className="text-cost" title={r.usage.estimated ? 'Estimated cost (mock, not charged)' : 'Cost'}>
           {formatCost(r.cost.total_usd)}
         </span>
         <span title="Total time">{formatMs(r.timing.total_ms)}</span>
