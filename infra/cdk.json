@@ -1,0 +1,8 @@
+{
+  "app": "npx tsx bin/sift.ts",
+  "context": {
+    "alertEmail": "you@example.com",
+    "monthlyBudgetUsd": 50,
+    "dailyModelBudgetUsd": 5
+  }
+}

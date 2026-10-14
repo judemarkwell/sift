@@ -1,0 +1,24 @@
+{
+  "name": "sift-infra",
+  "private": true,
+  "version": "0.1.0",
+  "bin": {
+    "sift-infra": "bin/sift.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.273.0",
+    "constructs": "^10.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "aws-cdk": "^2.1145.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9"
+  }
+}
