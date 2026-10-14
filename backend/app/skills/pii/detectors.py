@@ -93,7 +93,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str], object]] = [
         "API_KEY",
         re.compile(
             r"\b(?:sk-ant-[A-Za-z0-9_\-]{20,}|sk-(?:proj-)?[A-Za-z0-9_\-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}"
-            r"|xox[abposr]-[A-Za-z0-9\-]{10,}|AIza[0-9A-Za-z_\-]{35}|sk_live_[0-9A-Za-z]{20,}"
+            r"|xox[abposr]-[A-Za-z0-9\-]{10,}|AIza[0-9A-Za-z_\-]{25,}|sk_live_[0-9A-Za-z]{20,}"
             r"|rk_live_[0-9A-Za-z]{20,})\b"
         ),
         None,

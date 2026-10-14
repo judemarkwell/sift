@@ -134,3 +134,18 @@ def test_shape_hints_are_useful_but_never_leak_the_secret():
     assert hint("PASSWORD", "hunter22") == "a password of 8 characters using lowercase, digits"
     assert hint("EMAIL", "jane@acme.com") == "an email address"  # no domain: it can identify a person
     assert hint("PERSON", "Jane Doe") is None
+
+
+def test_key_length_is_checked_against_the_normal_length():
+    from app.skills.pii.hints import hint
+
+    full = "sk-ant-api03-" + "a" * 95  # 108
+    assert "the normal length" in hint("API_KEY", full)
+    short = hint("API_KEY", full[:97])
+    assert "97 characters long, 11 shorter than the 108" in short and "cut off" in short
+    assert "2 longer" in hint("API_KEY", full + "xy")
+    assert "normally" not in hint("API_KEY", "sk-proj-" + "b" * 40)  # no fixed length: no claim
+
+
+def test_truncated_google_key_is_still_detected():
+    assert kinds("key AIzaSyA1234567890abcdefghijkl") == ["API_KEY"]

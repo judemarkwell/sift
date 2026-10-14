@@ -23,7 +23,10 @@ PLACEHOLDER_NOTE = (
     "can be restored.\n"
     "- If the exact characters of a value would really change your answer, say what to check "
     "about it (for example \"make sure [API_KEY_1] was copied in full\") instead of saying you "
-    "can't see it."
+    "can't see it.\n"
+    "- Facts listed below about a value (its type, length, whether it looks complete) were checked "
+    "by the app against the real value. Use them directly, for example: \"[API_KEY_1] is 97 "
+    "characters, 11 short of a normal Anthropic key, so it was probably cut off when you copied it.\""
 )
 
 
