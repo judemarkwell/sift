@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS audit (
   created_at TEXT NOT NULL, data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS audit_by_org ON audit(org_id, id);
+CREATE TABLE IF NOT EXISTS members (
+  user_id TEXT PRIMARY KEY, org_id TEXT NOT NULL, data TEXT NOT NULL
+);
 """
 
 
@@ -267,6 +270,19 @@ class SqliteStorage:
 
     def delete_comparison(self, org_id: str, comparison_id: str) -> None:
         self._exec("DELETE FROM comparisons WHERE org_id=? AND id=?", (org_id, comparison_id))
+
+    # ---- workspace membership ----
+
+    def get_member(self, user_id: str) -> dict[str, Any] | None:
+        rows = self._exec("SELECT data FROM members WHERE user_id=?", (user_id,))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def add_member_if_absent(self, member: dict[str, Any]) -> dict[str, Any]:
+        """Insert unless the user already has a workspace; return what's stored.
+        Two first requests racing each other end up in the same workspace."""
+        self._exec("INSERT OR IGNORE INTO members VALUES (?,?,?)",
+                   (member["user_id"], member["org_id"], json.dumps(member, default=str)))
+        return self.get_member(member["user_id"])  # type: ignore[return-value]
 
     # ---- audit ----
 

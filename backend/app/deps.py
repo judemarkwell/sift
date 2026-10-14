@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.auth import Auth, make_auth
 from app.billing.payments import MockPayments
 from app.billing.service import Billing
 from app.config import settings
@@ -29,8 +30,9 @@ def make_storage() -> Storage:
 
 class App:
     def __init__(self, storage: Storage | None = None, adapters=None, default_plan: str | None = None,
-                 daily_budget_usd: float | None = None) -> None:
+                 daily_budget_usd: float | None = None, auth: Auth | None = None) -> None:
         self.storage = storage or make_storage()
+        self.auth = auth or make_auth(self.storage)
         self.secure = SecureFolder(self.storage)
         self.billing = Billing(self.storage, MockPayments(), default_plan or settings.default_plan)
         self.gateway = Gateway(

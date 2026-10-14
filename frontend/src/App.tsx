@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { AuthGate } from '@/components/AuthGate'
 import { ChatPage } from '@/components/chat/ChatPage'
 import { PinDialog } from '@/components/PinDialog'
 import { ComparePage } from '@/components/pages/ComparePage'
@@ -71,8 +72,10 @@ function Shell() {
 
 export default function App() {
   return (
-    <AppDataProvider>
-      <Shell />
-    </AppDataProvider>
+    <AuthGate>
+      <AppDataProvider>
+        <Shell />
+      </AppDataProvider>
+    </AuthGate>
   )
 }

@@ -17,7 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.auth import current_principal
+from app.auth import AuthError
+from app.config import settings
 from app.billing.payments import PaymentError
 from app.billing.plans import PLANS, TOPUP_AMOUNTS, TOPUP_FEE
 from app.billing.service import PlanError
@@ -69,6 +70,15 @@ def get_app() -> App:
     return core
 
 
+def current_principal(authorization: str | None = Header(default=None), a: App = Depends(get_app)) -> Principal:
+    """The signed-in caller (see app/auth.py). Every route depends on this."""
+    try:
+        return a.auth.principal(authorization)
+    except AuthError as exc:
+        raise HTTPException(401, {"message": str(exc), "code": "signed_out"},
+                            headers={"WWW-Authenticate": "Bearer"}) from exc
+
+
 def _sse(event: str, data: object) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
@@ -83,6 +93,20 @@ def _plan_error(exc: PlanError) -> HTTPException:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/auth/config")
+def auth_config(a: App = Depends(get_app)) -> dict[str, Any]:
+    """What the browser needs to sign in. Public: none of it is secret."""
+    if a.auth.mode != "cognito":
+        return {"mode": a.auth.mode}
+    return {
+        "mode": "cognito",
+        "region": settings.cognito_region,
+        "client_id": settings.cognito_client_id,
+        "domain": settings.cognito_domain,
+        "providers": settings.cognito_providers,
+    }
 
 
 class ModelView(ModelInfo):

@@ -7,7 +7,7 @@
  *   Fargate task ── DynamoDB  (single table: chats, traces, settings, billing)
  *                ── Secrets Manager (model API keys)
  *                ── Comprehend (PII detection)   ── Bedrock (optional models)
- *   Cognito user pool → JWTs the API verifies (app/auth.py)
+ *   Cognito user pool (SiftAuth stack) → ID tokens the API verifies (app/auth.py)
  *
  * Cost notes (the things that bill while idle):
  *   - No NAT gateway: tasks run in public subnets with a locked-down security
@@ -20,7 +20,6 @@ import { Construct } from 'constructs'
 import * as budgets from 'aws-cdk-lib/aws-budgets'
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront'
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins'
-import * as cognito from 'aws-cdk-lib/aws-cognito'
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb'
 import * as ec2 from 'aws-cdk-lib/aws-ec2'
 import * as ecs from 'aws-cdk-lib/aws-ecs'
@@ -30,6 +29,8 @@ import * as logs from 'aws-cdk-lib/aws-logs'
 import * as s3 from 'aws-cdk-lib/aws-s3'
 import * as secrets from 'aws-cdk-lib/aws-secretsmanager'
 
+import type { SiftAuthStack } from './auth-stack'
+
 export interface SiftStackProps extends cdk.StackProps {
   /** Email for budget alerts. */
   alertEmail: string
@@ -37,6 +38,8 @@ export interface SiftStackProps extends cdk.StackProps {
   monthlyBudgetUsd: number
   /** Platform-wide daily cap on model spend, enforced by the app. */
   dailyModelBudgetUsd: number
+  /** Sign-in (deployed separately so it can exist before the rest). */
+  auth: SiftAuthStack
 }
 
 export class SiftStack extends cdk.Stack {
@@ -77,25 +80,6 @@ export class SiftStack extends cdk.Stack {
       secretObjectValue: { ANTHROPIC_API_KEY: cdk.SecretValue.unsafePlainText('set-me') },
     })
 
-    // ---- auth ---------------------------------------------------------------
-    const users = new cognito.UserPool(this, 'Users', {
-      userPoolName: 'sift-users',
-      selfSignUpEnabled: true,
-      signInAliases: { email: true },
-      autoVerify: { email: true },
-      passwordPolicy: { minLength: 10 },
-      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-      customAttributes: {
-        org_id: new cognito.StringAttribute({ mutable: true }),
-        role: new cognito.StringAttribute({ mutable: true }),
-      },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    })
-    const webClient = users.addClient('Web', {
-      authFlows: { userSrp: true },
-      preventUserExistenceErrors: true,
-    })
-
     // ---- API (FastAPI on Fargate) --------------------------------------------
     // Public subnets only: no NAT gateway to pay for. The task's security group
     // only accepts traffic from the load balancer.
@@ -126,8 +110,11 @@ export class SiftStack extends cdk.Stack {
           SIFT_DYNAMODB_TABLE: table.tableName,
           SIFT_DEFAULT_PLAN: 'free',
           SIFT_DAILY_BUDGET_USD: String(props.dailyModelBudgetUsd),
-          SIFT_COGNITO_USER_POOL_ID: users.userPoolId,
-          SIFT_COGNITO_CLIENT_ID: webClient.userPoolClientId,
+          SIFT_AUTH: 'cognito',
+          SIFT_COGNITO_REGION: props.auth.region,
+          SIFT_COGNITO_USER_POOL_ID: props.auth.userPool.userPoolId,
+          SIFT_COGNITO_CLIENT_ID: props.auth.client.userPoolClientId,
+          SIFT_COGNITO_DOMAIN: props.auth.domainUrl,
           SIFT_ENABLE_MOCK_MODELS: 'true',
         },
         secrets: {
@@ -204,7 +191,5 @@ export class SiftStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'Url', { value: `https://${cdn.distributionDomainName}` })
     new cdk.CfnOutput(this, 'SiteBucket', { value: site.bucketName })
     new cdk.CfnOutput(this, 'DistributionId', { value: cdn.distributionId })
-    new cdk.CfnOutput(this, 'UserPoolId', { value: users.userPoolId })
-    new cdk.CfnOutput(this, 'UserPoolClientId', { value: webClient.userPoolClientId })
   }
 }

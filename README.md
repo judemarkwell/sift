@@ -73,7 +73,7 @@ backend/app
   providers/         Anthropic adapter + mock providers (same interface)
   billing/           plans, allowance/credit ledger, payment provider (mock)
   storage/           Storage interface; SQLite now, DynamoDB design documented
-  auth.py            the caller (local user now, Cognito later)
+  auth.py            the caller: local dev user, or a verified Cognito ID token
 frontend/src
   components/chat    composer, thread, trace panel
   components/pages   compare, usage, skills, plans
@@ -95,7 +95,7 @@ infra/               AWS CDK stack (see infra/README.md)
 
 ## Next
 
-1. AWS: implement `DynamoDBStorage` and `CognitoVerifier`, then `cdk deploy` (see `infra/README.md`)
+1. AWS: sign-in is done (deploy `SiftAuth`, see `infra/README.md`); next implement `DynamoDBStorage`, then `cdk deploy Sift`
 2. Real Comprehend client and Stripe Checkout behind the existing interfaces
 3. Second real provider (OpenAI, or models via Bedrock), and Sign in with ChatGPT
 4. Documents (PDF, text) with retrieval, and "what supported this answer" in the trace

@@ -24,6 +24,7 @@ import type {
   UploadedImage,
   SecureStatus,
 } from './types'
+import { authHeaders, notifySignedOut } from './auth'
 import { unlockHeaders } from './unlock-token'
 
 /** An API error with the server's message and, for plan limits, a code. */
@@ -40,6 +41,7 @@ export class ApiError extends Error {
 async function errorFrom(res: Response): Promise<ApiError> {
   const body = await res.json().catch(() => null)
   const detail = body?.detail
+  if (res.status === 401 && detail?.code === 'signed_out') notifySignedOut()
   if (detail && typeof detail === 'object' && 'message' in detail) {
     return new ApiError(detail.message, res.status, detail.code)
   }
@@ -54,6 +56,7 @@ async function request<T>(path: string, init?: RequestInit & { json?: unknown })
     headers: {
       ...(json !== undefined ? { 'Content-Type': 'application/json' } : (rest.headers as Record<string, string>)),
       ...unlockHeaders(),
+      ...(await authHeaders()),
     },
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   })
@@ -101,6 +104,12 @@ export const api = {
   setRetention: (retention_days: number | null) =>
     request<{ retention_days: number | null }>('/api/account/privacy', { method: 'PATCH', json: { retention_days } }),
   exportData: () => request<string>('/api/account/export'),
+  /** An uploaded image as a blob (images need the sign-in header, so no plain <img src>). */
+  uploadBlob: async (id: string): Promise<Blob> => {
+    const res = await fetch(`/api/uploads/${id}`, { headers: await authHeaders() })
+    if (!res.ok) throw await errorFrom(res)
+    return res.blob()
+  },
   deleteData: () =>
     request<{ deleted: Record<string, number>; kept: string }>('/api/account/delete', {
       method: 'POST',
@@ -169,7 +178,7 @@ export async function streamChat(
 ): Promise<void> {
   const res = await fetch('/api/chat/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...unlockHeaders() },
+    headers: { 'Content-Type': 'application/json', ...unlockHeaders(), ...(await authHeaders()) },
     body: JSON.stringify(body),
     signal,
   })

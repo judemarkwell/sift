@@ -51,3 +51,15 @@ export function setDraft(key: string, draft: Draft, secure: boolean): void {
 export function clearSecureDrafts(): void {
   secureDrafts.clear()
 }
+
+/** Called on sign-out, so the next person in this tab starts clean. */
+export function clearAllDrafts(): void {
+  secureDrafts.clear()
+  try {
+    const s = session()
+    if (!s) return
+    for (const k of Object.keys(s)) if (k.startsWith(PREFIX)) s.removeItem(k)
+  } catch {
+    /* nothing stored */
+  }
+}

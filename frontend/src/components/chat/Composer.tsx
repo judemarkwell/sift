@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, ImagePlus, ShieldAlert, ShieldCheck, Square, Type, X } from 'lucide-react'
 
+import { AuthImage } from '@/components/AuthImage'
 import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
 import type { SendOptions } from '@/hooks/useChat'
@@ -329,7 +330,7 @@ export function Composer({
               ))}
               {images.map((img) => (
                 <span key={img.id} className="inline-flex items-center gap-2 rounded-md border border-border py-1 pl-1 pr-1.5 text-[12px]">
-                  <img src={`/api/uploads/${img.id}`} alt="" className="size-8 rounded object-cover" />
+                  <AuthImage id={img.id} alt="" className="size-8 rounded bg-muted object-cover" />
                   <span className="leading-tight">
                     <span className="block text-ink">{formatTokens(img.tokens)} tokens</span>
                     <span className="block text-muted-foreground">

@@ -40,6 +40,15 @@ class Settings:
     default_plan: str
     # Local stand-in for a signed-in Cognito user.
     dev_user_email: str
+    # "local": no sign-in, everything runs as one dev user. "cognito": every
+    # request needs a Cognito ID token.
+    auth_mode: str
+    cognito_region: str
+    cognito_user_pool_id: str
+    cognito_client_id: str
+    cognito_domain: str  # https://<prefix>.auth.<region>.amazoncognito.com
+    # Identity providers offered on the sign-in screen besides email ("Google").
+    cognito_providers: list[str]
 
 
 settings = Settings(
@@ -50,6 +59,14 @@ settings = Settings(
     enable_mock_models=os.getenv("SIFT_ENABLE_MOCK_MODELS", "true").lower() != "false",
     storage=os.getenv("SIFT_STORAGE", "sqlite"),
     sqlite_path=os.getenv("SIFT_SQLITE_PATH", str(BACKEND_DIR / "data" / "sift.db")),
-    default_plan=os.getenv("SIFT_DEFAULT_PLAN", "pro"),
+    # Real sign-ins start on Free; the local dev user gets Pro to try everything.
+    default_plan=os.getenv("SIFT_DEFAULT_PLAN")
+    or ("free" if os.getenv("SIFT_AUTH", "local") == "cognito" else "pro"),
     dev_user_email=os.getenv("SIFT_DEV_USER", "you@example.com"),
+    auth_mode=os.getenv("SIFT_AUTH", "local"),
+    cognito_region=os.getenv("SIFT_COGNITO_REGION", "us-east-1"),
+    cognito_user_pool_id=os.getenv("SIFT_COGNITO_USER_POOL_ID", ""),
+    cognito_client_id=os.getenv("SIFT_COGNITO_CLIENT_ID", ""),
+    cognito_domain=os.getenv("SIFT_COGNITO_DOMAIN", "").rstrip("/"),
+    cognito_providers=[p.strip() for p in os.getenv("SIFT_COGNITO_PROVIDERS", "").split(",") if p.strip()],
 )

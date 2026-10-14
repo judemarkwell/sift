@@ -5,6 +5,7 @@ import { ShieldAlert } from 'lucide-react'
 
 import { SecretSpan, SecretsContext, markdownComponents } from '@/components/chat/CodeAndSecrets'
 import { InfoLine } from '@/components/chat/InfoLine'
+import { AuthImage } from '@/components/AuthImage'
 import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
 import { renderMarked } from '@/lib/marks'
@@ -78,16 +79,18 @@ export function MessageList({ messages, models, selectedId, onInspect, onContinu
               {m.attachments.length > 0 && (
                 <div className="flex flex-wrap justify-end gap-2">
                   {m.attachments.map((a) => (
-                    <a key={a.id} href={`/api/uploads/${a.id}`} target="_blank" rel="noreferrer" className="block">
-                      <img
-                        src={`/api/uploads/${a.id}`}
+                    <div key={a.id}>
+                      <AuthImage
+                        id={a.id}
+                        link
                         alt={`Attached image, ${a.width}×${a.height}`}
-                        className="max-h-48 max-w-[16rem] rounded-lg border border-border object-cover"
+                        className="block max-h-48 max-w-[16rem] rounded-lg border border-border object-cover"
+                        style={{ aspectRatio: `${a.width} / ${a.height}`, width: Math.min(256, (192 * a.width) / a.height) }}
                       />
                       <span className="mt-0.5 block text-right text-[11px] text-muted-foreground">
                         {formatTokens(a.tokens)} tokens
                       </span>
-                    </a>
+                    </div>
                   ))}
                 </div>
               )}

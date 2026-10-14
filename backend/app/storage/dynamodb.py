@@ -12,6 +12,8 @@ vault         ORG#<org>              VAULT#<conv_id>                 encrypted w
 settings      ORG#<org>|USER#<user>  SETTINGS                        org policy / user preference
 account       ORG#<org>              ACCOUNT                         plan, period, balances
 ledger        ORG#<org>              LEDGER#<created_at>#<id>
+member        USER#<user>            MEMBER                          workspace of a signed-in user;
+                                                                     put with attribute_not_exists(PK)
 
 Daily spend for the platform budget comes from a counter item
 (PK=PLATFORM, SK=SPEND#<yyyy-mm-dd>) updated with an atomic ADD, rather

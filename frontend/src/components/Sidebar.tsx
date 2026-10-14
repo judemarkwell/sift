@@ -5,6 +5,7 @@ import {
   Columns2,
   CreditCard,
   Lock,
+  LogOut,
   Monitor,
   Moon,
   Plus,
@@ -17,6 +18,8 @@ import {
 import { LockIcon } from '@/components/LockIcon'
 import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
+import { authMode, signOut } from '@/lib/auth'
+import { clearAllDrafts } from '@/lib/drafts'
 import { href, navigate, type Route } from '@/lib/route'
 import { expandFolder, lock, openSecureChat, useSecure } from '@/lib/secure-store'
 import type { ConversationSummary } from '@/lib/types'
@@ -242,19 +245,33 @@ export function Sidebar({ route, open, onClose }: Props) {
           </div>
         </div>
         {me && (
-          <a
-            href={href({ page: 'plans' })}
-            onClick={onClose}
-            className="block border-t border-border px-5 py-3.5 text-xs text-muted-foreground hover:bg-muted"
-          >
-            <span className="flex items-baseline justify-between">
-              <span className="font-medium text-ink">{me.plan_name} plan</span>
-              <span>
-                <span className="font-medium text-cost">{formatCost(me.available_usd, { cents: true })}</span> left
+          <div className="border-t border-border text-xs text-muted-foreground">
+            <a href={href({ page: 'plans' })} onClick={onClose} className="block px-5 pb-1 pt-3.5 hover:bg-muted">
+              <span className="flex items-baseline justify-between">
+                <span className="font-medium text-ink">{me.plan_name} plan</span>
+                <span>
+                  <span className="font-medium text-cost">{formatCost(me.available_usd, { cents: true })}</span> left
+                </span>
               </span>
-            </span>
-            <span className="mt-1 block truncate">{me.principal.email}</span>
-          </a>
+            </a>
+            <div className="flex items-center justify-between gap-2 px-5 pb-3 pt-1">
+              <span className="min-w-0 truncate">{me.principal.email}</span>
+              {authMode() === 'cognito' && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    signOut(() => {
+                      lock() // ends secure-folder access and wipes secure drafts
+                      clearAllDrafts()
+                    })
+                  }
+                  className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-ring"
+                >
+                  <LogOut className="size-3.5" /> Sign out
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </nav>
     </>
