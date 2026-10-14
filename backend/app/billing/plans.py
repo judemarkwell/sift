@@ -19,6 +19,8 @@ class Plan(BaseModel):
     per_seat: bool = False
     models: list[str] | None  # live model ids allowed; None = all
     features: list[str]  # feature flags the app checks
+    images_per_day: int = 1  # image uploads per user per UTC day (per seat for team)
+    prompt_skills: int | None = None  # saved prompt skills; None = unlimited
     highlights: list[str]  # what the plans page lists
 
     @property
@@ -40,8 +42,11 @@ PLANS: dict[str, Plan] = {
             included_usage_usd=0.25,
             models=[HAIKU],
             features=[],
+            images_per_day=1,
+            prompt_skills=3,
             highlights=[
                 "$0.25 of Claude Haiku usage each month (hundreds of messages)",
+                "1 image upload a day, and up to 3 saved prompt skills",
                 "Full traces, cost per message and PII redaction",
                 "Free mock models for unlimited practice",
             ],
@@ -54,10 +59,11 @@ PLANS: dict[str, Plan] = {
             included_usage_usd=6,
             models=[HAIKU, SONNET],
             features=["topups"],
+            images_per_day=25,
             highlights=[
                 "$6 of model usage at cost, $3 for Sift",
                 "Claude Haiku and Sonnet",
-                "Usage dashboard and per-message spend limits",
+                "25 images a day, unlimited prompt skills",
                 "Top up anytime at cost plus 10%",
             ],
         ),
@@ -69,11 +75,12 @@ PLANS: dict[str, Plan] = {
             included_usage_usd=18,
             models=None,
             features=["topups", "compare"],
+            images_per_day=100,
             highlights=[
                 "$18 of model usage at cost, $6 for Sift",
                 "Every model, including Claude Opus",
                 "Compare models side by side on the same prompt",
-                "Top up anytime at cost plus 10%",
+                "100 images a day, unlimited prompt skills",
             ],
         ),
         Plan(
@@ -85,9 +92,11 @@ PLANS: dict[str, Plan] = {
             per_seat=True,
             models=None,
             features=["topups", "compare", "workspace_policy"],
+            images_per_day=100,
             highlights=[
                 "Per seat: $12 of model usage at cost, $6 for Sift, pooled across the team",
                 "Lock skills for everyone, such as required PII redaction",
+                "Share prompt skills with the workspace; audit log",
                 "Every model and side-by-side comparison",
                 "Single sign-on (coming with AWS Cognito)",
             ],

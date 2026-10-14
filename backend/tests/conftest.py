@@ -21,6 +21,7 @@ class FakeLive:
                       cache_read_price_per_mtok=100.0, live=True)
 
     def __init__(self) -> None:
+        self.last_request = None
         self.last_sent = None
         self.last_options = None
         self.fail = False
@@ -29,6 +30,7 @@ class FakeLive:
         return [self.model]
 
     async def stream(self, request, sent_messages, options: dict[str, Any]):
+        self.last_request = request
         self.last_sent = sent_messages
         self.last_options = options
         if self.fail:

@@ -37,6 +37,8 @@ class App:
             settings_for=self.skill_settings,
             charge=self.billing.charge,
             daily_budget_usd=settings.daily_budget_usd if daily_budget_usd is None else daily_budget_usd,
+            default_output_tokens=settings.default_output_tokens,
+            max_output_tokens=settings.max_output_tokens,
         )
 
     def skill_settings(self, principal: Principal) -> dict[str, ResolvedSkill]:

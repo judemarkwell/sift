@@ -29,7 +29,9 @@ class Settings:
     # Hard ceiling on real-model spend per UTC day across everyone, so a bug
     # or abuse can't run up an unbounded bill. 0 disables the cap.
     daily_budget_usd: float
+    # Longest reply allowed (hard cap) and the default when no style sets one.
     max_output_tokens: int
+    default_output_tokens: int
     enable_mock_models: bool
     storage: str  # "sqlite" | "memory" | "dynamodb"
     sqlite_path: str
@@ -43,7 +45,8 @@ class Settings:
 settings = Settings(
     anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
     daily_budget_usd=_float("SIFT_DAILY_BUDGET_USD", 2.0),
-    max_output_tokens=int(_float("SIFT_MAX_OUTPUT_TOKENS", 2048)),
+    max_output_tokens=int(_float("SIFT_MAX_OUTPUT_TOKENS", 32_000)),
+    default_output_tokens=int(_float("SIFT_DEFAULT_OUTPUT_TOKENS", 8_000)),
     enable_mock_models=os.getenv("SIFT_ENABLE_MOCK_MODELS", "true").lower() != "false",
     storage=os.getenv("SIFT_STORAGE", "sqlite"),
     sqlite_path=os.getenv("SIFT_SQLITE_PATH", str(BACKEND_DIR / "data" / "sift.db")),

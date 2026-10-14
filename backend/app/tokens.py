@@ -17,5 +17,10 @@ def estimate_tokens(text: str) -> int:
 
 
 def estimate_messages(messages: list[Message]) -> int:
-    # ~4 tokens of per-message overhead for role markers, like most chat formats
-    return sum(estimate_tokens(m.content) + 4 for m in messages)
+    # ~4 tokens of per-message overhead for role markers, like most chat formats.
+    # Images are counted exactly (see app/images.py).
+    return sum(estimate_tokens(m.content) + 4 + sum(i.tokens for i in m.images) for m in messages)
+
+
+def image_tokens(messages: list[Message]) -> int:
+    return sum(i.tokens for m in messages for i in m.images)

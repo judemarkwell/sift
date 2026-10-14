@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.schema import Conversation, Trace
+from app.schema import Conversation, PromptSkill, Trace
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -43,6 +43,23 @@ CREATE TABLE IF NOT EXISTS ledger (
   created_at TEXT NOT NULL, data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ledger_by_org ON ledger(org_id, id);
+
+CREATE TABLE IF NOT EXISTS uploads (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, meta TEXT NOT NULL, data BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS uploads_by_org ON uploads(org_id, created_at);
+
+CREATE TABLE IF NOT EXISTS prompt_skills (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, owner_id TEXT NOT NULL,
+  shared INTEGER NOT NULL, data TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, org_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_by_org ON audit(org_id, id);
 """
 
 
@@ -175,3 +192,87 @@ class SqliteStorage:
     def list_ledger(self, org_id: str, limit: int = 50) -> list[dict[str, Any]]:
         rows = self._exec("SELECT data FROM ledger WHERE org_id=? ORDER BY id DESC LIMIT ?", (org_id, limit))
         return [json.loads(r["data"]) for r in rows]
+
+    # ---- uploads ----
+
+    def put_upload(self, meta: dict[str, Any], data: bytes) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO uploads VALUES (?,?,?,?,?,?)",
+            (meta["id"], meta["org_id"], meta["user_id"], meta["created_at"], json.dumps(meta), data),
+        )
+
+    def get_upload(self, org_id: str, upload_id: str) -> dict[str, Any] | None:
+        rows = self._exec("SELECT meta FROM uploads WHERE org_id=? AND id=?", (org_id, upload_id))
+        return json.loads(rows[0]["meta"]) if rows else None
+
+    def get_upload_bytes(self, org_id: str, upload_id: str) -> bytes:
+        rows = self._exec("SELECT data FROM uploads WHERE org_id=? AND id=?", (org_id, upload_id))
+        if not rows:
+            raise KeyError(upload_id)
+        return bytes(rows[0]["data"])
+
+    def count_uploads_since(self, org_id: str, since: datetime, user_id: str | None = None) -> int:
+        sql, args = "SELECT COUNT(*) AS n FROM uploads WHERE org_id=? AND created_at>=?", [org_id, since.isoformat()]
+        if user_id:
+            sql += " AND user_id=?"
+            args.append(user_id)
+        return int(self._exec(sql, tuple(args))[0]["n"])
+
+    # ---- prompt skills ----
+
+    def put_prompt_skill(self, skill: PromptSkill) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO prompt_skills VALUES (?,?,?,?,?)",
+            (skill.id, skill.org_id, skill.owner_id, int(skill.shared), skill.model_dump_json()),
+        )
+
+    def get_prompt_skill(self, org_id: str, skill_id: str) -> PromptSkill | None:
+        rows = self._exec("SELECT data FROM prompt_skills WHERE org_id=? AND id=?", (org_id, skill_id))
+        return PromptSkill.model_validate_json(rows[0]["data"]) if rows else None
+
+    def list_prompt_skills(self, org_id: str, user_id: str) -> list[PromptSkill]:
+        rows = self._exec(
+            "SELECT data FROM prompt_skills WHERE org_id=? AND (owner_id=? OR shared=1)", (org_id, user_id)
+        )
+        return [PromptSkill.model_validate_json(r["data"]) for r in rows]
+
+    def delete_prompt_skill(self, org_id: str, skill_id: str) -> None:
+        self._exec("DELETE FROM prompt_skills WHERE org_id=? AND id=?", (org_id, skill_id))
+
+    # ---- audit ----
+
+    def add_audit(self, org_id: str, entry: dict[str, Any]) -> None:
+        self._exec(
+            "INSERT INTO audit (org_id, created_at, data) VALUES (?,?,?)",
+            (org_id, str(entry.get("created_at")), json.dumps(entry, default=str)),
+        )
+
+    def list_audit(self, org_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self._exec("SELECT data FROM audit WHERE org_id=? ORDER BY id DESC LIMIT ?", (org_id, limit))
+        return [json.loads(r["data"]) for r in rows]
+
+    # ---- retention and erasure ----
+
+    def purge_user_before(self, org_id: str, user_id: str, before: datetime) -> dict[str, int]:
+        cut = before.isoformat()
+        old = self._exec(
+            "SELECT id FROM conversations WHERE org_id=? AND user_id=? AND updated_at<?", (org_id, user_id, cut)
+        )
+        for r in old:
+            self._exec("DELETE FROM vaults WHERE org_id=? AND conversation_id=?", (org_id, r["id"]))
+        self._exec("DELETE FROM conversations WHERE org_id=? AND user_id=? AND updated_at<?", (org_id, user_id, cut))
+        traces = self._exec("SELECT COUNT(*) AS n FROM traces WHERE org_id=? AND user_id=? AND created_at<?",
+                            (org_id, user_id, cut))[0]["n"]
+        self._exec("DELETE FROM traces WHERE org_id=? AND user_id=? AND created_at<?", (org_id, user_id, cut))
+        ups = self._exec("SELECT COUNT(*) AS n FROM uploads WHERE org_id=? AND user_id=? AND created_at<?",
+                         (org_id, user_id, cut))[0]["n"]
+        self._exec("DELETE FROM uploads WHERE org_id=? AND user_id=? AND created_at<?", (org_id, user_id, cut))
+        return {"conversations": len(old), "traces": int(traces), "uploads": int(ups)}
+
+    def delete_user_data(self, org_id: str, user_id: str) -> dict[str, int]:
+        counts = self.purge_user_before(org_id, user_id, datetime.max.replace(tzinfo=None))
+        n = self._exec("SELECT COUNT(*) AS n FROM prompt_skills WHERE org_id=? AND owner_id=?",
+                       (org_id, user_id))[0]["n"]
+        self._exec("DELETE FROM prompt_skills WHERE org_id=? AND owner_id=?", (org_id, user_id))
+        self._exec("DELETE FROM settings WHERE scope='user' AND scope_id=?", (user_id,))
+        return {**counts, "prompt_skills": int(n)}

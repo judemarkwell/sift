@@ -28,9 +28,21 @@ def utcnow() -> datetime:
 Role = Literal["system", "user", "assistant"]
 
 
+class ImageRef(BaseModel):
+    """An uploaded image attached to a message. Bytes live in storage; logs
+    and traces only ever hold this reference."""
+
+    id: str
+    media_type: str
+    width: int
+    height: int
+    tokens: int  # what the model counts it as, input tokens
+
+
 class Message(BaseModel):
     role: Role
     content: str
+    images: list[ImageRef] = Field(default_factory=list)
 
 
 class ModelInfo(BaseModel):
@@ -44,6 +56,8 @@ class ModelInfo(BaseModel):
     cache_read_price_per_mtok: float | None = None
     description: str = ""
     live: bool = Field(default=False, description="True for real providers that cost money")
+    vision: bool = Field(default=True, description="Accepts images")
+    max_output_tokens: int = Field(default=64_000, description="Longest reply the model can produce")
 
 
 class AIRequest(BaseModel):
@@ -56,7 +70,7 @@ class AIRequest(BaseModel):
     model: str
     messages: list[Message]
     system: str | None = None
-    max_output_tokens: int = 1024
+    max_output_tokens: int = 8000
 
 
 class Usage(BaseModel):
@@ -180,6 +194,11 @@ class StoredMessage(BaseModel):
     status: Literal["done", "error", "blocked"] = "done"
     error: str | None = None
     trace_id: str | None = None
+    # When "Continue" extended a cut-off reply, the earlier parts' traces.
+    previous_trace_ids: list[str] = Field(default_factory=list)
+    truncated: bool = False  # the reply hit its length limit
+    styles: list[str] = Field(default_factory=list)  # output styles applied (user messages)
+    attachments: list[ImageRef] = Field(default_factory=list)
     # Spans in `content` that a skill acted on, for highlighting in the UI.
     marks: list[Finding] = Field(default_factory=list)
 
@@ -193,6 +212,11 @@ class Conversation(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     messages: list[StoredMessage] = Field(default_factory=list)
+    skill_id: str | None = None  # a saved prompt skill this chat runs under
+    skill_name: str | None = None
+    # The skill's instructions as they were when the chat started, so editing
+    # or deleting the skill never changes a conversation already in progress.
+    skill_note: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -202,6 +226,7 @@ class ConversationSummary(BaseModel):
     updated_at: datetime
     message_count: int
     spend_usd: float
+    skill_name: str | None = None
 
 
 class Principal(BaseModel):
@@ -214,3 +239,37 @@ class Principal(BaseModel):
 
 
 JSON = dict[str, Any]
+
+
+# ---- prompt skills (user-made) ------------------------------------------------------
+
+
+class SkillField(BaseModel):
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    label: str = Field(min_length=1, max_length=80)
+    placeholder: str = Field("", max_length=200)
+    required: bool = False
+    multiline: bool = False
+
+
+class PromptSkill(BaseModel):
+    """A reusable task the user set up: instructions the model follows for the
+    whole chat, plus the details it needs to collect up front."""
+
+    id: str = Field(default_factory=lambda: new_id("ps"))
+    org_id: str
+    owner_id: str
+    name: str = Field(min_length=1, max_length=60)
+    description: str = Field("", max_length=200)
+    icon: str = "sparkles"
+    instructions: str = Field(min_length=1, max_length=8000)
+    fields: list[SkillField] = Field(default_factory=list, max_length=12)
+    starter: str = Field("", max_length=2000, description="First message; {{key}} fills in a field")
+    styles: list[str] = Field(default_factory=list)
+    model_id: str | None = None
+    ask_for_missing: bool = True
+    shared: bool = False  # visible to the whole workspace
+    pinned: bool = True  # shows as a button on new chats
+    use_count: int = 0
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

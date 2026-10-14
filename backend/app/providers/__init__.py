@@ -1,5 +1,5 @@
 from app.config import settings
-from app.providers.base import ProviderAdapter, ProviderError, StreamItem
+from app.providers.base import ProviderAdapter, ProviderError, StopReason, StreamItem
 from app.providers.mock import MOCK_PROVIDERS
 
 
@@ -18,4 +18,4 @@ def build_adapters() -> list[ProviderAdapter]:
     return adapters
 
 
-__all__ = ["ProviderAdapter", "ProviderError", "StreamItem", "build_adapters"]
+__all__ = ["ProviderAdapter", "ProviderError", "StopReason", "StreamItem", "build_adapters"]

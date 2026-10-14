@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
-from app.providers.base import ProviderError
+from app.providers.base import CONTINUE_PROMPT, ProviderError, StopReason, StreamItem
 from app.schema import AIRequest, Message, ModelInfo
 
 
@@ -27,7 +27,7 @@ class Persona:
 
 
 def _topic(text: str, words: int = 8) -> str:
-    without_commands = re.sub(r"/(error|long)\b", "", text)
+    without_commands = re.sub(r"/(error|long|cutoff)\b", "", text)
     cleaned = re.sub(r"\s+", " ", without_commands).strip().rstrip("?.!")
     parts = cleaned.split(" ")
     snippet = " ".join(parts[:words])
@@ -85,19 +85,29 @@ class MockAdapter:
     def models(self) -> list[ModelInfo]:
         return self._models
 
-    def _compose(self, request: AIRequest, sent: list[Message]) -> str:
-        last_user = next((m.content for m in reversed(sent) if m.role == "user"), "")
-        topic = _topic(last_user) or "this"
-        turns = sum(1 for m in sent if m.role == "user")
-        opener = random.choice(self._persona.opener).format(topic=topic)
-        closer = random.choice(self._persona.closer)
-        memory = (
-            f"\n\n_(This is turn {turns} of our conversation, so I received "
-            f"{len(sent)} messages of context.)_"
-            if turns > 1
-            else ""
-        )
+    def _compose(self, request: AIRequest, sent: list[Message], styles: list[str]) -> str:
+        last = next((m for m in reversed(sent) if m.role == "user"), None)
+        last_user = last.content if last else ""
         model_name = next(m.name for m in self._models if m.id == request.model)
+        sign = f"\n\n— *{model_name}, mock response*"
+
+        if last_user == CONTINUE_PROMPT:
+            return (
+                "…and to finish the thought: the remaining points follow the same pattern. Check each "
+                "assumption against real data, keep the next step small, and write down what you learned "
+                "so the next decision is easier." + sign
+            )
+
+        topic = _topic(last_user) or "this"
+        system = "\n".join(m.content for m in sent if m.role == "system")
+        skill = re.search(r'saved skill "([^"]+)"', system)
+        preface = f"_Following your **{skill.group(1)}** skill._\n\n" if skill else ""
+        if last and last.images:
+            sizes = ", ".join(f"{i.width}×{i.height}" for i in last.images)
+            n = len(last.images)
+            preface += f"I can see {n} image{'s' if n > 1 else ''} ({sizes}). "
+            preface += "(A mock can't actually look at it; a real model would describe it here.)\n\n"
+
         placeholders = list(dict.fromkeys(re.findall(r"\[[A-Z_]+_\d+\]", last_user)))
         privacy = (
             "\n\n**Using your details:** I'll include "
@@ -106,16 +116,46 @@ class MockAdapter:
             if placeholders
             else ""
         )
-        return (
-            f"{opener}\n\n{_body(topic, '/long' in last_user)}{privacy}\n\n{closer}"
-            f"{memory}\n\n— *{model_name}, mock response*"
+
+        if "tldr" in styles or "short" in styles:
+            label = "**TL;DR:** " if "tldr" in styles else ""
+            return (
+                f"{preface}{label}For *{topic}*, start from the outcome you want, test your biggest "
+                f"assumption first, and take one small step today.{privacy}{sign}"
+            )
+        if "steps" in styles:
+            body = "\n".join(f"{i}. {s}" for i, s in enumerate(STEPS, 1))
+        elif "table" in styles:
+            body = TABLE
+        elif "code" in styles:
+            body = CODE
+        elif "bullets" in styles:
+            body = "\n".join(f"- {s}" for s in STEPS)
+        else:
+            body = _body(topic, "long" in styles)
+        opener = random.choice(self._persona.opener).format(topic=topic)
+        closer = random.choice(self._persona.closer)
+        turns = sum(1 for m in sent if m.role == "user")
+        memory = (
+            f"\n\n_(This is turn {turns} of our conversation, so I received "
+            f"{len(sent)} messages of context.)_"
+            if turns > 1
+            else ""
         )
+        tone = " Formally speaking," if "formal" in styles else ""
+        return f"{preface}{opener}{tone}\n\n{body}{privacy}\n\n{closer}{memory}{sign}"
 
     async def stream(
         self, request: AIRequest, sent_messages: list[Message], options: dict[str, Any]
-    ) -> AsyncIterator[str]:
-        text = self._compose(request, sent_messages)
+    ) -> AsyncIterator[StreamItem]:
+        text = self._compose(request, sent_messages, options.get("styles", []))
         last_user = sent_messages[-1].content if sent_messages else ""
+
+        # Respect the reply budget like a real model would: cut off and say so.
+        budget = 60 if "/cutoff" in last_user else request.max_output_tokens
+        truncated = len(text) > budget * 4
+        if truncated:
+            text = text[: budget * 4]
 
         await asyncio.sleep(random.randint(*self._first_token_ms) / 1000)
 
@@ -130,6 +170,29 @@ class MockAdapter:
                 )
             yield chunk
             await asyncio.sleep(random.randint(*self._chunk_delay_ms) / 1000)
+        yield StopReason("length" if truncated else "stop")
+
+
+
+STEPS = [
+    "Write down the outcome you want and how you'll know you got it.",
+    "List what you know for sure, and separately what you're assuming.",
+    "Test the riskiest assumption first, as cheaply as you can.",
+    "Do the smallest useful piece of work and check the result.",
+    "Repeat, adjusting the plan with what you learned.",
+]
+TABLE = (
+    "Here's the comparison at a glance.\n\n"
+    "| Option | Cost | Speed | Risk |\n|---|---|---|---|\n"
+    "| Do it now | Low | Fast | Medium |\n| Plan first | Medium | Slower | Low |\n"
+    "| Wait | None | — | High |"
+)
+CODE = (
+    "```python\n"
+    "def weighted_score(scores: dict[str, float], weights: dict[str, float]) -> float:\n"
+    "    return sum(weights[k] * scores[k] for k in weights)\n"
+    "```"
+)
 
 
 MOCK_PROVIDERS = [

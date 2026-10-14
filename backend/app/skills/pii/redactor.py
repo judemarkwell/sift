@@ -164,7 +164,7 @@ def redact_messages(
                 pieces.append(ph)
                 cursor = span.end
         pieces.append(text[cursor:])
-        out.append(Message(role=msg.role, content="".join(pieces)))
+        out.append(Message(role=msg.role, content="".join(pieces), images=msg.images))
     return RedactionResult(out, findings, blocked)
 
 

@@ -10,11 +10,12 @@ Prices are from https://platform.claude.com/docs/en/about-claude/pricing
 
 from __future__ import annotations
 
+import base64
 from typing import Any, AsyncIterator
 
 import anthropic
 
-from app.providers.base import ProviderError, StreamItem
+from app.providers.base import ProviderError, StopReason, StreamItem
 from app.schema import AIRequest, Message, ModelInfo, Usage
 
 PROVIDER = "Anthropic"
@@ -31,6 +32,7 @@ MODELS = [
         cache_read_price_per_mtok=0.01,
         description="Fastest and cheapest. Prompts over 100K tokens cost 5x more.",
         live=True,
+        max_output_tokens=128_000,
     ),
     ModelInfo(
         id="claude-sonnet-5-5",
@@ -43,6 +45,7 @@ MODELS = [
         cache_read_price_per_mtok=0.10,
         description="Strong all-rounder at a moderate price.",
         live=True,
+        max_output_tokens=128_000,
     ),
     ModelInfo(
         id="claude-opus-5-5",
@@ -55,6 +58,7 @@ MODELS = [
         cache_read_price_per_mtok=0.20,
         description="Most capable for complex work.",
         live=True,
+        max_output_tokens=128_000,
     ),
 ]
 
@@ -73,11 +77,28 @@ class AnthropicAdapter:
         self, request: AIRequest, sent_messages: list[Message], options: dict[str, Any]
     ) -> AsyncIterator[StreamItem]:
         system = "\n\n".join(m.content for m in sent_messages if m.role == "system")
-        messages = [
-            {"role": m.role, "content": m.content}
-            for m in sent_messages
-            if m.role != "system"
-        ]
+        load_image = options.get("load_image")
+        messages = []
+        for m in sent_messages:
+            if m.role == "system":
+                continue
+            if m.images and load_image:
+                blocks: list[dict] = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type,
+                            "data": base64.b64encode(load_image(img.id)).decode(),
+                        },
+                    }
+                    for img in m.images
+                ]
+                if m.content:
+                    blocks.append({"type": "text", "text": m.content})
+                messages.append({"role": m.role, "content": blocks})
+            else:
+                messages.append({"role": m.role, "content": m.content})
         kwargs: dict = {
             "model": request.model,
             "max_tokens": min(request.max_output_tokens, self._max_output_tokens),
@@ -104,6 +125,7 @@ class AnthropicAdapter:
         except anthropic.APIConnectionError as exc:
             raise ProviderError("Couldn't reach Anthropic. Check your internet connection") from exc
 
+        yield StopReason("length" if final.stop_reason == "max_tokens" else "stop")
         u = final.usage
         yield Usage(
             input_tokens=u.input_tokens,

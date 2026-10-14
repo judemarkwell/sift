@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Callable, Union
 
-from app.providers import ProviderAdapter, ProviderError
+from app.providers import ProviderAdapter, ProviderError, StopReason
 from app.schema import (
     AIRequest,
     AIResponse,
@@ -37,7 +37,8 @@ from app.skills.base import PipelineContext, Skill, StepResult
 from app.skills.pii.redactor import Vault
 from app.skills.registry import SKILLS, ResolvedSkill
 from app.storage.base import Storage
-from app.tokens import estimate_messages, estimate_tokens
+from app.styles import STYLE_BY_ID, style_budget, style_instructions
+from app.tokens import estimate_messages, estimate_tokens, image_tokens
 
 
 class UnknownModelError(ValueError):
@@ -101,7 +102,12 @@ class Gateway:
         charge: Charger | None = None,
         daily_budget_usd: float = 0.0,
         skills: list[Skill] = SKILLS,
+        default_output_tokens: int = 8_000,
+        max_output_tokens: int = 32_000,
     ):
+        self.load_image: Callable[[str, str], bytes] | None = getattr(storage, "get_upload_bytes", None)
+        self.default_output_tokens = default_output_tokens
+        self.max_output_tokens = max_output_tokens
         self.storage = storage
         self.settings_for = settings_for
         self.charge = charge
@@ -182,11 +188,14 @@ class Gateway:
     def _context(ctx: PipelineContext) -> ContextBreakdown:
         convo = [m for m in ctx.messages if m.role != "system"]
         history, prompt = convo[:-1], convo[-1:]
+        images = image_tokens(convo)
         segments = [
             ContextSegment(label="System instructions", tokens=estimate_tokens(ctx.system_prompt or "")),
-            ContextSegment(label="Conversation history", tokens=estimate_messages(history)),
-            ContextSegment(label="Your prompt", tokens=estimate_messages(prompt)),
+            ContextSegment(label="Conversation history", tokens=estimate_messages(history) - image_tokens(history)),
+            ContextSegment(label="Your prompt", tokens=estimate_messages(prompt) - image_tokens(prompt)),
         ]
+        if images:
+            segments.append(ContextSegment(label="Images", tokens=images))
         return ContextBreakdown(
             segments=segments, total_tokens=sum(s.tokens for s in segments), window=ctx.model.context_window
         )
@@ -199,9 +208,17 @@ class Gateway:
         messages: list[Message],
         *,
         ephemeral: bool = False,
-        max_output_tokens: int = 1024,
+        styles: list[str] | None = None,
+        skill_name: str | None = None,
+        skill_note: str | None = None,
+        continuation: bool = False,
     ) -> AsyncIterator[GatewayEvent]:
         adapter, model = self.resolve(model_id)
+        styles = [s for s in (styles or []) if s in STYLE_BY_ID]
+        budget = min(
+            style_budget(styles, self.default_output_tokens, self.max_output_tokens),
+            model.max_output_tokens,
+        )
         clock = _Clock()
         settings = self.settings_for(principal)
         vault = (
@@ -215,13 +232,36 @@ class Gateway:
             conversation_id=conversation_id,
             model=model.id,
             messages=messages,
-            max_output_tokens=max_output_tokens,
+            max_output_tokens=budget,
         )
         ctx = PipelineContext(
             principal=principal, request=request, model=model, messages=list(messages), vault=vault
         )
         steps: list[PipelineStep] = []
         trace_id = new_id("trace")
+        ctx.provider_options["styles"] = styles
+        if self.load_image:
+            org = principal.org_id
+            ctx.provider_options["load_image"] = lambda image_id: self.load_image(org, image_id)
+
+        # The user's own instructions come first: a saved skill, then output style.
+        if skill_note:
+            ctx.system_notes.append(skill_note)
+            steps.append(PipelineStep(
+                name=f"Skill: {skill_name}", stage="pre-request", duration_ms=0, status="changed",
+                detail=f"Added this skill's instructions (~{estimate_tokens(skill_note):,} tokens); "
+                       "they're included on every turn of this chat",
+            ))
+        note = style_instructions(styles)
+        if note:
+            ctx.system_notes.append(note)
+        steps.append(PipelineStep(
+            name="Output style", stage="pre-request", duration_ms=0,
+            status="changed" if styles else "ok",
+            detail=(", ".join(STYLE_BY_ID[s].label for s in styles) + ". " if styles else "Default. ")
+            + (f"Continuing a cut-off reply. " if continuation else "")
+            + f"Reply limit {budget:,} tokens",
+        ))
 
         await self._run_stage(ctx, settings, "pre-request", steps)
         if not ephemeral and vault.by_placeholder:
@@ -245,6 +285,7 @@ class Gateway:
         raw: list[str] = []
         shown: list[str] = []
         reported: Usage | None = None
+        stop = "stop"
         ttft = 0
         provider_start = time.perf_counter()
 
@@ -257,6 +298,9 @@ class Gateway:
             async for item in adapter.stream(request, sent, ctx.provider_options):
                 if isinstance(item, Usage):
                     reported = item
+                    continue
+                if isinstance(item, StopReason):
+                    stop = item.reason
                     continue
                 if not raw:
                     ttft = clock.ms()
@@ -285,8 +329,10 @@ class Gateway:
                 name=f"{model.name} via {adapter.provider}",
                 stage="provider",
                 duration_ms=int((time.perf_counter() - provider_start) * 1000),
-                detail=ctx.error or f"Streamed {len(raw)} chunks",
-                status="error" if ctx.error else "ok",
+                detail=ctx.error
+                or (f"Stopped at the {budget:,}-token reply limit. Use Continue for the rest"
+                    if stop == "length" else f"Streamed {len(raw)} chunks"),
+                status="error" if ctx.error else ("warn" if stop == "length" else "ok"),
             )
         )
 
@@ -304,7 +350,8 @@ class Gateway:
 
         content = "".join(shown)
         trace = self._trace(trace_id, principal, conversation_id, model, adapter, sent, context, steps,
-                            content=ctx.raw_output, usage=ctx.usage, finish="error" if ctx.error else "stop",
+                            content=ctx.raw_output, usage=ctx.usage,
+                            finish="error" if ctx.error else ("length" if stop == "length" else "stop"),
                             ttft=ttft, clock=clock, ephemeral=ephemeral)
         if ctx.cost is not None:
             trace.response.cost = ctx.cost
