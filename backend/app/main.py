@@ -289,7 +289,7 @@ async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principa
                 if isinstance(ev, Finished):
                     yield _sse("done", payload)
                 else:
-                    yield _sse("error", {"message": ev.message, "blocked": ev.blocked, **payload})
+                    yield _sse("error", {**payload, "error": ev.message, "blocked": ev.blocked})
 
     return StreamingResponse(
         events(),

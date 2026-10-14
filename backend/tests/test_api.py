@@ -153,6 +153,25 @@ def test_scan_endpoint_and_usage(client):
     assert u["by_model"][0]["model_id"] == "fake-live" and len(u["daily"]) == 7
 
 
+def test_history_findings_are_not_double_counted(client):
+    _, events = stream(client, model="mock-a", message="mail jane@acme.com")
+    conv = events[0][1]["conversation_id"]
+    _, events = stream(client, model="mock-a", conversation_id=conv, message="and thanks")
+    step = next(s for s in last(events, "done")["trace"]["pipeline"] if s["skill_id"] == "pii-redaction")
+    assert step["findings"] == [] and "earlier" in step["detail"]
+    # ...but the history still went out redacted
+    sent = last(events, "done")["trace"]["sent_messages"]
+    assert any("[EMAIL_1]" in m["content"] for m in sent) and "jane@acme.com" not in str(sent)
+    assert client.get("/api/usage").json()["privacy"]["redact"] == 1
+
+
+def test_error_event_carries_text(client, fake):
+    fake.fail = True
+    _, events = stream(client, model="fake-live", message="hi")
+    err = last(events, "error")
+    assert err["error"] == "FakeCo is down" and err["message"]["status"] == "error"
+
+
 def test_report_has_no_raw_pii(client):
     client.patch("/api/skills/pii-redaction", json={"config": {"preset": "customer_data"}})
     code, events = stream(client, model="fake-live", message="Email jane@acme.com")

@@ -100,10 +100,9 @@ class MockAdapter:
         model_name = next(m.name for m in self._models if m.id == request.model)
         placeholders = list(dict.fromkeys(re.findall(r"\[[A-Z_]+_\d+\]", last_user)))
         privacy = (
-            "\n\n**About your details:** I only received "
+            "\n\n**Using your details:** I'll include "
             + ", ".join(placeholders)
-            + " rather than the real values, so I'll refer to them that way: for example, "
-            f"I'd send the follow-up to {placeholders[0]}."
+            + f" where it's needed. For example, the follow-up goes to {placeholders[0]}."
             if placeholders
             else ""
         )

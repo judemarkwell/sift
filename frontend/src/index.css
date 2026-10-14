@@ -13,6 +13,15 @@
   --accent-soft: #dcebea;
   --cost: #9a6a12;
   --danger: #b4412f;
+  /* Categorical chart slots: the dataviz reference palette, validated against these surfaces. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -28,6 +37,14 @@
     --accent-soft: #1f3638;
     --cost: #e0b25a;
     --danger: #ec8a78;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
   }
 }
 
@@ -181,5 +198,24 @@ body {
   100% {
     opacity: 0;
     top: calc(100% - 0.75rem);
+  }
+}
+
+/* A value Sift restored from a placeholder: the model never saw it. */
+.pii-restored {
+  font-style: normal;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-bottom: 1.5px dotted color-mix(in srgb, var(--accent) 70%, transparent);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+dialog[open] {
+  animation: dialog-in 160ms ease-out;
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
   }
 }

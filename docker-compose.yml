@@ -9,6 +9,8 @@ services:
         required: false
     volumes:
       - ./backend/app:/app/app
+      # Chats, traces and settings (SQLite) survive container restarts.
+      - ./backend/data:/app/data
     ports:
       - "8000:8000"
 

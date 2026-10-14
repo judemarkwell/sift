@@ -45,13 +45,11 @@ SECRETS = ("API_KEY", "AWS_ACCESS_KEY", "PRIVATE_KEY", "PASSWORD")
 PRESETS: dict[str, dict] = {
     "personal": {
         "name": "Personal",
-        "description": "Hide secrets and financial numbers. Point out contact details without changing them.",
+        "description": "Replace secrets, card numbers, IDs and contact details with placeholders. Point out addresses and birthdays.",
         "policy": _policy(
-            "warn",
-            **{k: "redact" for k in SECRETS},
-            CREDIT_CARD="redact",
-            IBAN="redact",
-            SSN="redact",
+            "redact",
+            ADDRESS="warn",
+            DATE_OF_BIRTH="warn",
             PERSON="allow",
             IP_ADDRESS="allow",
         ),
@@ -85,3 +83,8 @@ PRESETS: dict[str, dict] = {
 }
 
 DEFAULT_PRESET = "personal"
+
+
+def lower_label(label: str) -> str:
+    """'Email address' -> 'email address', but 'API key' stays 'API key'."""
+    return label if len(label) > 1 and label[1].isupper() else label[:1].lower() + label[1:]

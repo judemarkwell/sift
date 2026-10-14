@@ -89,9 +89,9 @@ def test_redaction_is_stable_and_reversible():
 
 def test_warn_and_allow_leave_text_alone():
     policy = PRESETS["personal"]["policy"]
-    res = redact_messages([Message(role="user", content="I'm at jane@acme.com")], policy, [P], Vault())
-    assert res.messages[0].content == "I'm at jane@acme.com"
-    assert [f.action for f in res.findings] == ["warn"]
+    res = redact_messages([Message(role="user", content="I'm at 1200 Main Street, 10.0.0.1")], policy, [P], Vault())
+    assert res.messages[0].content == "I'm at 1200 Main Street, 10.0.0.1"
+    assert [f.action for f in res.findings] == ["warn"]  # address warns, IP is allowed
 
 
 def test_block_still_replaces_value_for_logs():
@@ -118,4 +118,4 @@ def test_stream_restorer_doesnt_hold_forever():
 
 def test_scan_respects_policy():
     found = scan("jane@acme.com 10.0.0.1", PRESETS["personal"]["policy"], [P])
-    assert [f.kind for f in found] == ["EMAIL"]  # IP is "allow" in Personal
+    assert [(f.kind, f.action) for f in found] == [("EMAIL", "redact")]  # IP is "allow" in Personal

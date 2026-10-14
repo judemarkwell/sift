@@ -8,7 +8,7 @@ from app.schema import Cost, Finding, ModelInfo, Usage
 from app.skills.base import BaseSkill, PipelineContext, SkillManifest, StepResult
 from app.skills.pii.detectors import PatternDetector
 from app.skills.pii.redactor import PLACEHOLDER_RE, detect, mask
-from app.skills.pii.entities import ENTITY_BY_KIND
+from app.skills.pii.entities import ENTITY_BY_KIND, lower_label
 from app.tokens import estimate_messages, estimate_tokens
 
 # ---- pricing (shared with billing and the usage dashboard) ----------------------
@@ -162,7 +162,7 @@ class PromptCacheSkill(BaseSkill):
         return StepResult("ok", "Requested" if supported else f"{ctx.model.name} doesn't support caching")
 
     async def after(self, ctx: PipelineContext, config: BaseModel) -> StepResult | None:
-        if not ctx.usage or not ctx.cost:
+        if not ctx.usage or not ctx.cost or ctx.model.cache_read_price_per_mtok is None:
             return None
         saved = ctx.cost.uncached_usd - ctx.cost.total_usd
         if ctx.usage.cache_read_tokens:
@@ -211,7 +211,7 @@ class ResponseScanSkill(BaseSkill):
         ]
         if not findings:
             return StepResult("ok", "Nothing sensitive in the reply")
-        kinds = sorted({f.label.lower() for f in findings})
+        kinds = sorted({lower_label(f.label) for f in findings})
         return StepResult("warn", f"The reply contains {', '.join(kinds)}. Check before sharing.", findings)
 
 

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from app.schema import PiiAction
 from app.skills.base import BaseSkill, PipelineContext, SkillManifest, StepResult
 from app.skills.pii.detectors import DETECTORS
-from app.skills.pii.entities import DEFAULT_PRESET, PRESETS, Policy
+from app.skills.pii.entities import DEFAULT_PRESET, PRESETS, Policy, lower_label
 from app.skills.pii.redactor import StreamRestorer, redact_messages
 
 PLACEHOLDER_NOTE = (
@@ -70,22 +70,25 @@ class PiiRedactionSkill(BaseSkill):
         # Even when blocking, the trace (a log) must only ever hold the redacted text.
         ctx.messages = result.messages
         if result.blocked:
-            kinds = sorted({f.label.lower() for f in result.blocked})
+            kinds = sorted({lower_label(f.label) for f in result.blocked})
             ctx.block(
                 f"Blocked by your privacy policy: this message contains {', '.join(kinds)}. "
                 "Remove it, or change the policy in Skills."
             )
-            return StepResult("blocked", f"Stopped before sending: {', '.join(kinds)}", result.findings)
+            return StepResult("blocked", f"Stopped before sending: {', '.join(kinds)}", current or result.blocked)
 
-        redacted = [f for f in result.findings if f.action == "redact"]
-        warned = [f for f in result.findings if f.action == "warn"]
-        if redacted:
+        # Placeholders matter for every message (history is re-sent), but the
+        # step reports only what's new in this turn so counts don't repeat.
+        if any(f.action == "redact" for f in result.findings):
             ctx.system_notes.append(PLACEHOLDER_NOTE)
             if config.restore_in_reply:
                 ctx.transformers.append(StreamRestorer(ctx.vault))
 
-        if not result.findings:
-            return StepResult("ok", "Nothing sensitive found")
+        redacted = [f for f in current if f.action == "redact"]
+        warned = [f for f in current if f.action == "warn"]
+        if not current:
+            note = f"Nothing new; {earlier} earlier item(s) still use their placeholders" if earlier else "Nothing sensitive found"
+            return StepResult("ok", note)
         parts = []
         if redacted:
             parts.append(f"replaced {len(redacted)} with placeholders")
@@ -93,5 +96,5 @@ class PiiRedactionSkill(BaseSkill):
             parts.append(f"{len(warned)} sent as-is (warn only)")
         detail = "; ".join(parts).capitalize()
         if earlier:
-            detail += f" ({earlier} of these were in earlier messages)"
-        return StepResult("changed" if redacted else "warn", detail, result.findings)
+            detail += f". {earlier} item(s) from earlier messages kept their placeholders"
+        return StepResult("changed" if redacted else "warn", detail, current)
