@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   BarChart3,
   ChevronRight,
@@ -17,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
 import { href, navigate, type Route } from '@/lib/route'
-import { collapseFolder, expandFolder, lock, openSecureChat, useSecure } from '@/lib/secure-store'
+import { expandFolder, lock, openSecureChat, useSecure } from '@/lib/secure-store'
 import type { ConversationSummary } from '@/lib/types'
 import { useTheme, type Theme } from '@/lib/theme'
 import { cn, formatCost } from '@/lib/utils'
@@ -71,17 +72,27 @@ function ChatRow({
 /** The PIN-protected folder at the top of the chat list. */
 function SecureFolder({ route, onClose }: { route: Route; onClose: () => void }) {
   const { status, expanded, chats } = useSecure()
+  // Keep the last list on screen while the folder animates closed; it's
+  // inert and hidden from assistive tech during that time.
+  const [shown, setShown] = useState(chats)
+  useEffect(() => {
+    if (expanded) setShown(chats)
+  }, [expanded, chats])
   if (!status?.visible) return null
 
-  const toggle = () => (expanded ? collapseFolder() : void expandFolder())
+  // Only Lock (or opening a non-secure chat) closes it.
+  const open = () => {
+    if (!expanded) void expandFolder()
+  }
 
   return (
     <li className="mb-1">
       <div className="flex items-center">
         <button
           type="button"
-          onClick={toggle}
+          onClick={open}
           aria-expanded={expanded}
+          title={expanded ? 'Use Lock to close the secure folder' : undefined}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
         >
           <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-90')} />
@@ -100,14 +111,22 @@ function SecureFolder({ route, onClose }: { route: Route; onClose: () => void })
           </button>
         )}
       </div>
-      {expanded && (
-        <ul className="ml-4 border-l border-border pl-1.5">
-          {chats.length === 0 && (
+      <div
+        className={cn(
+          'grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none',
+          expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+        )}
+        inert={!expanded}
+        aria-hidden={!expanded}
+        onTransitionEnd={() => !expanded && setShown([])}
+      >
+        <ul className="ml-4 min-h-0 overflow-hidden border-l border-border pl-1.5">
+          {shown.length === 0 && (
             <li className="px-2.5 py-1.5 text-[13px] text-muted-foreground">
               Empty. Use the lock button on a chat to move it here.
             </li>
           )}
-          {chats.map((c) => (
+          {shown.map((c) => (
             <ChatRow
               key={c.id}
               c={c}
@@ -115,14 +134,14 @@ function SecureFolder({ route, onClose }: { route: Route; onClose: () => void })
               href={href({ page: 'chat', id: c.id })}
               onClick={(e) => {
                 e.preventDefault()
-                openSecureChat(c.id) // the folder closes; this chat stays open
+                openSecureChat(c.id) // the folder stays open
                 navigate({ page: 'chat', id: c.id })
                 onClose()
               }}
             />
           ))}
         </ul>
-      )}
+      </div>
     </li>
   )
 }

@@ -3,9 +3,11 @@
  *
  * Access rules (the server enforces the same ones):
  * - Entering the PIN expands the folder and lists its chats.
- * - Picking a secure chat collapses the folder; only that chat stays open.
- * - Leaving that chat (or collapsing the folder when no secure chat is open)
- *   locks again, so the next visit needs the PIN.
+ * - The folder stays open while moving between secure chats or other pages.
+ * - Only Lock, or opening a non-secure chat (including New chat), closes it
+ *   and locks again, so the next visit needs the PIN.
+ * - A secure chat opened from a link (folder closed) stays open until you
+ *   leave it.
  */
 import { useSyncExternalStore } from 'react'
 
@@ -100,15 +102,11 @@ export async function expandFolder(): Promise<void> {
   set({ expanded: true })
 }
 
-/** Collapse the folder; locks too unless a secure chat is open. */
-export function collapseFolder() {
-  set({ expanded: false, chats: [] })
-  if (!state.openId) lock()
-}
-
-/** Allow one secure chat to stay open while the folder is closed. */
+/** Mark a secure chat as the one being viewed. The folder stays as it is. */
 export function openSecureChat(id: string | null) {
-  set({ openId: id, expanded: false, chats: [] })
+  set({ openId: id })
+  // A chat just created or moved in should show up in an open folder.
+  if (id && id !== 'new' && state.expanded && !state.chats.some((c) => c.id === id)) void refreshSecureChats()
 }
 
 /** End access: forget the token, wipe secure drafts, and tell the server. */
@@ -120,13 +118,23 @@ export function lock() {
   if (had) void api.lockSecure().then(refreshSecureStatus).catch(() => undefined)
 }
 
-/** Lock when the user has moved away from the open secure chat. */
+/** Close and lock on a non-secure chat; keep access everywhere else. */
 export function onRouteChange(page: string, id: string | undefined) {
   const here = page === 'chat' ? (id ?? 'new') : null
-  if (state.openId && here !== state.openId) {
-    set({ openId: null })
-    if (!state.expanded) lock()
+  if (here && here === state.openId) return
+  if (here && state.chats.some((c) => c.id === here)) {
+    set({ openId: here }) // moving between secure chats
+    return
   }
+  if (page === 'chat') {
+    // A normal chat or New chat. (A locked secure chat opened by link also
+    // lands here; it has nothing to lock and shows its PIN screen.)
+    if (getUnlockToken() || state.expanded || state.openId) lock()
+    return
+  }
+  // Another page: an open folder stays open; a lone secure chat ends.
+  if (state.openId && !state.expanded) lock()
+  else set({ openId: null })
 }
 
 /** Open a secure chat from a link elsewhere (activity, usage): PIN first. */
