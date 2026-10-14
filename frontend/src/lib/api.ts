@@ -14,6 +14,8 @@ import type {
   Trace,
   UsageResponse,
   AuditEntry,
+  Comparison,
+  ComparisonSummary,
   ImageQuota,
   PromptSkill,
   PromptSkillInput,
@@ -98,6 +100,10 @@ export const api = {
       json: { confirm: 'DELETE' },
     }),
   audit: () => request<AuditEntry[]>('/api/audit'),
+  comparisons: () => request<ComparisonSummary[]>('/api/comparisons'),
+  comparison: (id: string) => request<Comparison>(`/api/comparisons/${id}`),
+  createComparison: (models: string[]) => request<Comparison>('/api/comparisons', { method: 'POST', json: { models } }),
+  deleteComparison: (id: string) => request<void>(`/api/comparisons/${id}`, { method: 'DELETE' }),
 }
 
 export type StreamEvent =
@@ -143,6 +149,7 @@ export async function streamChat(
     skill_id?: string
     skill_values?: Record<string, string>
     continue_message_id?: string
+    compare_id?: string
   },
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,

@@ -49,7 +49,7 @@ function Shell() {
       <Sidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} />
       <div className="flex min-w-0 flex-1">
         {route.page === 'chat' && <ChatPage conversationId={route.id} onOpenMenu={openMenu} />}
-        {route.page === 'compare' && <ComparePage onOpenMenu={openMenu} />}
+        {route.page === 'compare' && <ComparePage comparisonId={route.id} onOpenMenu={openMenu} />}
         {route.page === 'usage' && <UsagePage onOpenMenu={openMenu} />}
         {route.page === 'skills' && <SkillsPage sub={route.id} onOpenMenu={openMenu} />}
         {route.page === 'privacy' && <PrivacyPage onOpenMenu={openMenu} />}

@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Check, Menu } from 'lucide-react'
+import { Check, Columns2, CreditCard, MessageSquare, Menu, RefreshCw } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Dialog, PageHeader } from '@/components/ui/controls'
+import { Dialog, PageHeader, Segmented } from '@/components/ui/controls'
 import { useAppData } from '@/hooks/useAppData'
 import { api } from '@/lib/api'
-import { cn, formatCost, formatDate } from '@/lib/utils'
-import type { BillingResponse, CheckoutSession, Plan } from '@/lib/types'
+import { href } from '@/lib/route'
+import { cn, formatCost, formatDate, formatTokens } from '@/lib/utils'
+import type { BillingResponse, CheckoutSession, LedgerEntry, Plan } from '@/lib/types'
 
-const KIND_LABEL = { allowance: 'Included usage', usage: 'Usage', topup: 'Top-up', plan: 'Plan change' } as const
 
 export function PlansPage({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { refreshMe, refreshModels } = useAppData()
@@ -132,37 +132,7 @@ export function PlansPage({ onOpenMenu }: { onOpenMenu: () => void }) {
           </div>
         </section>
 
-        <section className="mt-12">
-          <h2 className="text-[16px] font-semibold">Activity</h2>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                  <th className="py-2 pr-3 font-medium">When</th>
-                  <th className="py-2 pr-3 font-medium">What</th>
-                  <th className="py-2 pr-3 text-right font-medium">Paid</th>
-                  <th className="py-2 text-right font-medium">Usage balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.ledger.map((e) => (
-                  <tr key={e.id} className="border-b border-border/70">
-                    <td className="py-2 pr-3 text-muted-foreground">{formatDate(e.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
-                    <td className="py-2 pr-3">
-                      {KIND_LABEL[e.kind]}
-                      <span className="text-muted-foreground"> · {e.description}</span>
-                    </td>
-                    <td className="py-2 pr-3 text-right">{e.paid_usd ? formatCost(e.paid_usd, { cents: true }) : ''}</td>
-                    <td className={cn('py-2 text-right', e.amount_usd < 0 ? 'text-muted-foreground' : 'text-primary')}>
-                      {e.amount_usd > 0 ? '+' : ''}
-                      {formatCost(e.amount_usd)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <Activity entries={data.ledger} />
       </div>
 
       <Dialog open={!!session} onClose={() => setSession(null)} title="Confirm purchase">
@@ -265,5 +235,149 @@ function PlanColumn({
         {current ? 'Your plan' : plan.price_usd === 0 ? 'Switch to Free' : `Choose ${plan.name}`}
       </Button>
     </div>
+  )
+}
+
+type Filter = 'all' | 'usage' | 'billing'
+
+/** Billing activity, grouped by day. Usage lines say which chat or comparison they came from. */
+function Activity({ entries }: { entries: LedgerEntry[] }) {
+  const [filter, setFilter] = useState<Filter>('all')
+  const [limit, setLimit] = useState(25)
+  const rows = entries.filter((e) => filter === 'all' || (filter === 'usage' ? e.kind === 'usage' : e.kind !== 'usage'))
+  const visible = rows.slice(0, limit)
+  const days = new Map<string, LedgerEntry[]>()
+  visible.forEach((e) => {
+    const d = new Date(e.created_at).toDateString()
+    days.set(d, [...(days.get(d) ?? []), e])
+  })
+  const usageTotal = (list: LedgerEntry[]) => list.filter((e) => e.kind === 'usage').reduce((n, e) => n - e.amount_usd, 0)
+
+  return (
+    <section className="mt-12">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[16px] font-semibold">Activity</h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Every charge and credit. Click a usage line to open the chat or comparison it came from.
+          </p>
+        </div>
+        <Segmented
+          size="sm"
+          label="Show"
+          value={filter}
+          onChange={(v) => {
+            setFilter(v)
+            setLimit(25)
+          }}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'usage', label: 'Usage' },
+            { value: 'billing', label: 'Plan & credit' },
+          ]}
+        />
+      </div>
+
+      {visible.length === 0 ? (
+        <p className="mt-6 border-y border-border py-8 text-center text-sm text-muted-foreground">
+          {filter === 'usage' ? 'No paid model usage yet. Mock models are free and don’t appear here.' : 'Nothing here yet.'}
+        </p>
+      ) : (
+        <div className="mt-4 flex flex-col gap-6">
+          {[...days.entries()].map(([day, list]) => (
+            <div key={day}>
+              <div className="flex items-baseline justify-between border-b border-border pb-1.5 text-xs text-muted-foreground">
+                <span className="font-medium text-ink">{formatDate(list[0].created_at, { weekday: 'long', month: 'short', day: 'numeric' })}</span>
+                {usageTotal(list) > 0 && (
+                  <span>
+                    Usage <span className="text-cost">{formatCost(usageTotal(list))}</span>
+                  </span>
+                )}
+              </div>
+              <ul className="divide-y divide-border/60">
+                {list.map((e) => (
+                  <ActivityRow key={e.id} e={e} />
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+      {rows.length > limit && (
+        <div className="mt-4 text-center">
+          <Button variant="ghost" size="sm" onClick={() => setLimit((n) => n + 25)}>
+            Show more ({rows.length - limit} left)
+          </Button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ActivityRow({ e }: { e: LedgerEntry }) {
+  const time = new Date(e.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const amount = (
+    <span className={cn('shrink-0 text-right tabular-nums', e.amount_usd < 0 ? 'text-ink' : 'text-primary')}>
+      {e.amount_usd > 0 ? '+' : ''}
+      {formatCost(e.amount_usd)}
+    </span>
+  )
+
+  if (e.kind === 'usage') {
+    const Icon = e.source_kind === 'comparison' ? Columns2 : MessageSquare
+    const link = e.source_id ? href({ page: e.source_kind === 'comparison' ? 'compare' : 'chat', id: e.source_id }) : null
+    const what = e.source_kind === 'comparison' ? 'Comparison' : 'Chat'
+    const details = [
+      e.input_tokens != null && `${formatTokens(e.input_tokens)} in`,
+      e.output_tokens != null && `${formatTokens(e.output_tokens)} out`,
+      e.cache_read_tokens ? `${formatTokens(e.cache_read_tokens)} from cache` : null,
+      e.image_tokens ? `incl. ${formatTokens(e.image_tokens)} image tokens` : null,
+      e.continued ? 'continued reply' : null,
+      e.truncated ? 'hit length limit' : null,
+    ].filter(Boolean)
+    const body = (
+      <>
+        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13.5px]">
+            <span className="text-muted-foreground">{what}:</span>{' '}
+            <span className={cn(link && 'group-hover:underline')}>{e.source_title ?? 'Unknown'}</span>
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {e.model_name ?? e.description} · {details.join(' · ')} · {time}
+          </span>
+        </span>
+        {amount}
+      </>
+    )
+    return (
+      <li>
+        {link ? (
+          <a href={link} className="group -mx-2 flex items-start gap-3 rounded-md px-2 py-2.5 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
+            {body}
+          </a>
+        ) : (
+          <div className="flex items-start gap-3 py-2.5" title="This chat was deleted">
+            {body}
+          </div>
+        )}
+      </li>
+    )
+  }
+
+  const Icon = e.kind === 'allowance' ? RefreshCw : CreditCard
+  const label = { allowance: 'Included usage added', topup: 'Usage credit added', plan: 'Plan changed', usage: '' }[e.kind]
+  return (
+    <li className="flex items-start gap-3 py-2.5">
+      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13.5px]">{label}</span>
+        <span className="block text-xs text-muted-foreground">
+          {e.description}
+          {e.paid_usd ? ` · paid ${formatCost(e.paid_usd, { cents: true })}` : ''} · {time}
+        </span>
+      </span>
+      {amount}
+    </li>
   )
 }

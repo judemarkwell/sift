@@ -273,3 +273,29 @@ class PromptSkill(BaseModel):
     use_count: int = 0
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ---- comparisons -----------------------------------------------------------------
+
+
+class ComparisonLane(BaseModel):
+    model_id: str
+    status: Literal["running", "done", "error", "blocked"] = "running"
+    content: str = ""
+    error: str | None = None
+    trace_id: str | None = None
+    marks: list[Finding] = Field(default_factory=list)
+
+
+class Comparison(BaseModel):
+    """One prompt sent to several models at once. Saved so it can be reopened;
+    each lane's trace has conversation_id == this id and ephemeral=True."""
+
+    id: str = Field(default_factory=lambda: new_id("cmp"))
+    org_id: str
+    user_id: str
+    created_at: datetime = Field(default_factory=utcnow)
+    prompt: str
+    title: str = ""
+    styles: list[str] = Field(default_factory=list)
+    lanes: list[ComparisonLane] = Field(default_factory=list)

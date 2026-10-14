@@ -30,6 +30,8 @@ from app.styles import STYLE_BY_ID, STYLES, parse_styles
 from app.gateway import BudgetExceededError, Delta, Failed, Finished, Started, UnknownModelError
 from app.report import conversation_report
 from app.schema import (
+    Comparison,
+    ComparisonLane,
     Conversation,
     ConversationSummary,
     Finding,
@@ -206,6 +208,8 @@ class ChatRequest(BaseModel):
     skill_values: dict[str, str] = Field(default_factory=dict)
     # Extend a reply that was cut off at its length limit.
     continue_message_id: str | None = None
+    # Compare mode: the saved comparison this lane belongs to.
+    compare_id: str | None = None
 
 
 def _history(conv: Conversation) -> list[Message]:
@@ -262,8 +266,14 @@ async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principa
 
     # Conversation
     skill: PromptSkill | None = None
+    comparison: Comparison | None = None
     if body.ephemeral:
-        conv = Conversation(id=new_id("cmp"), org_id=p.org_id, user_id=p.user_id, model_id=model.id)
+        if body.compare_id:
+            comparison = a.storage.get_comparison(p.org_id, body.compare_id)
+            if not comparison or comparison.user_id != p.user_id:
+                raise HTTPException(404, "Comparison not found")
+        conv = Conversation(id=comparison.id if comparison else new_id("cmp"), org_id=p.org_id,
+                            user_id=p.user_id, model_id=model.id)
     elif body.conversation_id:
         conv = _own_conversation(p, a, body.conversation_id)
     else:
@@ -301,13 +311,15 @@ async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principa
     conv.messages.append(user_msg)
     conv.updated_at = utcnow()
 
-    def save() -> None:
+    def save(reply: StoredMessage | None = None, status: str = "running") -> None:
         # Only saved once pre-request skills have run, so a blocked value is
         # masked before it's ever written down.
         if is_first:
             conv.title = conv.skill_name or _safe_title(user_msg.content, user_msg.marks)
         if not body.ephemeral:
             a.storage.put_conversation(conv)
+        elif comparison is not None:
+            _update_comparison(a, p, comparison.id, model.id, user_msg, conv.title, styles, reply, status)
 
     async def events():
         yield _sse("conversation", {"conversation_id": conv.id, "user_message_id": user_msg.id,
@@ -338,7 +350,7 @@ async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principa
                         user_msg.marks = [f for f in ev.prompt_marks if f.action != "block"]
                 conv.messages.append(reply)
                 conv.updated_at = utcnow()
-                save()
+                save(reply, "done" if isinstance(ev, Finished) else reply.status)
                 payload = {
                     "trace": ev.trace.model_dump(mode="json"),
                     "message": reply.model_dump(mode="json"),
@@ -350,6 +362,26 @@ async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principa
                     yield _sse("error", {**payload, "error": ev.message, "blocked": ev.blocked})
 
     return _sse_response(events())
+
+
+def _update_comparison(a: App, p: Principal, comparison_id: str, model_id: str, user_msg: StoredMessage,
+                       title: str, styles: list[str], reply: StoredMessage | None, status: str) -> None:
+    """Record one lane's progress. Lanes run concurrently, but each update is a
+    read-modify-write with no await in between, so they can't interleave."""
+    cmp = a.storage.get_comparison(p.org_id, comparison_id)
+    if cmp is None:
+        return
+    # The prompt is written only after redaction ran, with blocked values masked.
+    if not cmp.prompt or status == "blocked":
+        cmp.prompt, cmp.title, cmp.styles = user_msg.content, title, styles
+    lane = next((x for x in cmp.lanes if x.model_id == model_id), None)
+    if lane is None:
+        lane = ComparisonLane(model_id=model_id)
+        cmp.lanes.append(lane)
+    lane.status = status  # type: ignore[assignment]
+    if reply is not None:
+        lane.content, lane.error, lane.trace_id, lane.marks = reply.content, reply.error, reply.trace_id, reply.marks
+    a.storage.put_comparison(cmp)
 
 
 def _start_payload(ev: Started) -> dict[str, Any]:
@@ -412,6 +444,83 @@ def list_styles() -> list[dict[str, Any]]:
         {"id": s.id, "label": s.label, "group": s.group, "description": s.description, "max_tokens": s.max_tokens}
         for s in STYLES
     ]
+
+
+# ---- comparisons ---------------------------------------------------------------------
+
+
+class ComparisonIn(BaseModel):
+    models: list[str] = Field(min_length=2, max_length=3)
+
+
+def _lane_summary(a: App, org_id: str, lane: ComparisonLane) -> dict[str, Any]:
+    t = a.storage.get_trace(org_id, lane.trace_id) if lane.trace_id else None
+    out = lane.model_dump(mode="json")
+    if t:
+        r = t.response
+        out["stats"] = {
+            "cost_usd": r.cost.total_usd,
+            "ttft_ms": r.timing.time_to_first_token_ms,
+            "total_ms": r.timing.total_ms,
+            "input_tokens": r.usage.total_input_tokens,
+            "output_tokens": r.usage.output_tokens,
+            "estimated": r.usage.estimated,
+            "truncated": r.finish_reason == "length",
+        }
+    return out
+
+
+def _comparison_view(a: App, cmp: Comparison) -> dict[str, Any]:
+    lanes = [_lane_summary(a, cmp.org_id, x) for x in cmp.lanes]
+    return {
+        **cmp.model_dump(mode="json", exclude={"lanes"}),
+        "lanes": lanes,
+        "total_usd": sum(x.get("stats", {}).get("cost_usd", 0) for x in lanes),
+    }
+
+
+@app.post("/api/comparisons")
+def create_comparison(body: ComparisonIn, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+    if not a.billing.has_feature(p.org_id, "compare"):
+        raise _plan_error(PlanError("Comparing models is part of the Pro and Team plans.", "feature_not_in_plan"))
+    for mid in body.models:
+        try:
+            a.gateway.resolve(mid)
+        except UnknownModelError as exc:
+            raise HTTPException(404, str(exc)) from exc
+    cmp = Comparison(org_id=p.org_id, user_id=p.user_id, prompt="",
+                     lanes=[ComparisonLane(model_id=m) for m in dict.fromkeys(body.models)])
+    a.storage.put_comparison(cmp)
+    return _comparison_view(a, cmp)
+
+
+@app.get("/api/comparisons")
+def list_comparisons(p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+    _enforce_retention(p, a)
+    out = []
+    for c in a.storage.list_comparisons(p.org_id, p.user_id):
+        if not c.prompt:
+            continue  # never got past redaction (e.g. the page closed immediately)
+        v = _comparison_view(a, c)
+        out.append({k: v[k] for k in ("id", "title", "created_at", "total_usd")}
+                   | {"models": [x["model_id"] for x in v["lanes"]]})
+    return out
+
+
+@app.get("/api/comparisons/{comparison_id}")
+def get_comparison(comparison_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+    cmp = a.storage.get_comparison(p.org_id, comparison_id)
+    if not cmp or cmp.user_id != p.user_id:
+        raise HTTPException(404, "Comparison not found")
+    return _comparison_view(a, cmp)
+
+
+@app.delete("/api/comparisons/{comparison_id}", status_code=204)
+def delete_comparison(comparison_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+    cmp = a.storage.get_comparison(p.org_id, comparison_id)
+    if not cmp or cmp.user_id != p.user_id:
+        raise HTTPException(404, "Comparison not found")
+    a.storage.delete_comparison(p.org_id, comparison_id)
 
 
 # ---- images -------------------------------------------------------------------------
@@ -609,6 +718,7 @@ def export_data(p: Principal = Depends(current_principal), a: App = Depends(get_
         "user": p.model_dump(),
         "conversations": [c.model_dump(mode="json") for c in a.storage.list_conversations(p.org_id, p.user_id, 10_000)],
         "traces": [t.model_dump(mode="json") for t in a.storage.list_traces(p.org_id, user_id=p.user_id)],
+        "comparisons": [c.model_dump(mode="json") for c in a.storage.list_comparisons(p.org_id, p.user_id, 10_000)],
         "prompt_skills": [s.model_dump(mode="json") for s in a.storage.list_prompt_skills(p.org_id, p.user_id)
                           if s.owner_id == p.user_id],
         "settings": a.storage.get_settings("user", p.user_id),
@@ -839,8 +949,50 @@ def billing(p: Principal = Depends(current_principal), a: App = Depends(get_app)
         **a.billing.summary(p.org_id),
         "plans": [pl.model_dump() | {"sift_fee_usd": pl.sift_fee_usd} for pl in PLANS.values()],
         "topups": {"amounts": TOPUP_AMOUNTS, "fee": TOPUP_FEE},
-        "ledger": a.storage.list_ledger(p.org_id, 30),
+        "ledger": _ledger_view(p, a),
     }
+
+
+def _ledger_view(p: Principal, a: App, limit: int = 100) -> list[dict[str, Any]]:
+    """Ledger entries, with usage lines linked to the chat or comparison they
+    came from and the tokens behind the charge."""
+    models = {m.id: m for m in a.gateway.models()}
+    titles: dict[str, tuple[str, str] | None] = {}
+
+    def source(trace: Trace) -> tuple[str, str] | None:
+        key = trace.conversation_id
+        if key not in titles:
+            if trace.ephemeral:
+                c = a.storage.get_comparison(p.org_id, key)
+                titles[key] = ("comparison", c.title or "Comparison") if c else None
+            else:
+                c2 = a.storage.get_conversation(p.org_id, key)
+                titles[key] = ("chat", c2.title) if c2 else None
+        return titles[key]
+
+    out = []
+    for e in a.storage.list_ledger(p.org_id, limit):
+        if e.get("kind") == "usage" and e.get("trace_id"):
+            t = a.storage.get_trace(p.org_id, e["trace_id"])
+            if t:
+                src = source(t)
+                r = t.response
+                styles_step = next((s for s in t.pipeline if s.name == "Output style"), None)
+                e = {
+                    **e,
+                    "model_name": models[t.model].name if t.model in models else t.model,
+                    "source_kind": src[0] if src else ("comparison" if t.ephemeral else "chat"),
+                    "source_id": t.conversation_id if src else None,
+                    "source_title": src[1] if src else "Deleted",
+                    "input_tokens": r.usage.total_input_tokens,
+                    "output_tokens": r.usage.output_tokens,
+                    "cache_read_tokens": r.usage.cache_read_tokens,
+                    "image_tokens": sum(seg.tokens for seg in t.context.segments if seg.label == "Images"),
+                    "truncated": r.finish_reason == "length",
+                    "continued": bool(styles_step and "Continuing" in styles_step.detail),
+                }
+        out.append(e)
+    return out
 
 
 class CheckoutRequest(BaseModel):

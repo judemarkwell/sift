@@ -125,6 +125,17 @@ export interface LedgerEntry {
   description: string
   paid_usd?: number
   trace_id?: string
+  // Usage lines: where the spend came from.
+  model_name?: string
+  source_kind?: 'chat' | 'comparison'
+  source_id?: string | null
+  source_title?: string
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_tokens?: number
+  image_tokens?: number
+  truncated?: boolean
+  continued?: boolean
 }
 
 export interface BillingResponse {
@@ -267,4 +278,42 @@ export interface AuditEntry {
   action: string
   target: string
   detail: Record<string, unknown>
+}
+
+export interface LaneStats {
+  cost_usd: number
+  ttft_ms: number
+  total_ms: number
+  input_tokens: number
+  output_tokens: number
+  estimated: boolean
+  truncated: boolean
+}
+
+export interface ComparisonLane {
+  model_id: string
+  status: 'running' | 'done' | 'error' | 'blocked'
+  content: string
+  error: string | null
+  trace_id: string | null
+  marks: Finding[]
+  stats?: LaneStats
+}
+
+export interface Comparison {
+  id: string
+  created_at: string
+  prompt: string
+  title: string
+  styles: string[]
+  lanes: ComparisonLane[]
+  total_usd: number
+}
+
+export interface ComparisonSummary {
+  id: string
+  title: string
+  created_at: string
+  total_usd: number
+  models: string[]
 }

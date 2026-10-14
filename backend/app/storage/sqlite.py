@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.schema import Conversation, PromptSkill, Trace
+from app.schema import Comparison, Conversation, PromptSkill, Trace
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS prompt_skills (
   id TEXT PRIMARY KEY, org_id TEXT NOT NULL, owner_id TEXT NOT NULL,
   shared INTEGER NOT NULL, data TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS comparisons (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS comparisons_by_user ON comparisons(org_id, user_id, created_at);
 
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, org_id TEXT NOT NULL,
@@ -239,6 +245,29 @@ class SqliteStorage:
     def delete_prompt_skill(self, org_id: str, skill_id: str) -> None:
         self._exec("DELETE FROM prompt_skills WHERE org_id=? AND id=?", (org_id, skill_id))
 
+    # ---- comparisons ----
+
+    def put_comparison(self, comparison: Comparison) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO comparisons VALUES (?,?,?,?,?)",
+            (comparison.id, comparison.org_id, comparison.user_id, comparison.created_at.isoformat(),
+             comparison.model_dump_json()),
+        )
+
+    def get_comparison(self, org_id: str, comparison_id: str) -> Comparison | None:
+        rows = self._exec("SELECT data FROM comparisons WHERE org_id=? AND id=?", (org_id, comparison_id))
+        return Comparison.model_validate_json(rows[0]["data"]) if rows else None
+
+    def list_comparisons(self, org_id: str, user_id: str, limit: int = 50) -> list[Comparison]:
+        rows = self._exec(
+            "SELECT data FROM comparisons WHERE org_id=? AND user_id=? ORDER BY created_at DESC LIMIT ?",
+            (org_id, user_id, limit),
+        )
+        return [Comparison.model_validate_json(r["data"]) for r in rows]
+
+    def delete_comparison(self, org_id: str, comparison_id: str) -> None:
+        self._exec("DELETE FROM comparisons WHERE org_id=? AND id=?", (org_id, comparison_id))
+
     # ---- audit ----
 
     def add_audit(self, org_id: str, entry: dict[str, Any]) -> None:
@@ -267,7 +296,10 @@ class SqliteStorage:
         ups = self._exec("SELECT COUNT(*) AS n FROM uploads WHERE org_id=? AND user_id=? AND created_at<?",
                          (org_id, user_id, cut))[0]["n"]
         self._exec("DELETE FROM uploads WHERE org_id=? AND user_id=? AND created_at<?", (org_id, user_id, cut))
-        return {"conversations": len(old), "traces": int(traces), "uploads": int(ups)}
+        cmps = self._exec("SELECT COUNT(*) AS n FROM comparisons WHERE org_id=? AND user_id=? AND created_at<?",
+                          (org_id, user_id, cut))[0]["n"]
+        self._exec("DELETE FROM comparisons WHERE org_id=? AND user_id=? AND created_at<?", (org_id, user_id, cut))
+        return {"conversations": len(old), "traces": int(traces), "uploads": int(ups), "comparisons": int(cmps)}
 
     def delete_user_data(self, org_id: str, user_id: str) -> dict[str, int]:
         counts = self.purge_user_before(org_id, user_id, datetime.max.replace(tzinfo=None))

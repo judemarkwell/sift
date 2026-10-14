@@ -224,3 +224,49 @@ def test_export_and_delete_everything(client):
     assert client.get("/api/conversations").json() == []
     actions = [e["action"] for e in client.get("/api/audit").json()]
     assert actions[:3] == ["data.delete", "data.export", "prompt_skill.create"]
+
+
+# ---- saved comparisons and activity detail -------------------------------------------
+
+
+def test_comparisons_are_saved_and_listed(client):
+    cmp = client.post("/api/comparisons", json={"models": ["mock-a", "fake-live"]}).json()
+    assert [x["status"] for x in cmp["lanes"]] == ["running", "running"]
+    for m in ("mock-a", "fake-live"):
+        code, _ = stream(client, model=m, message="Email jane@acme.com a summary", ephemeral=True, compare_id=cmp["id"])
+        assert code == 200
+    full = client.get(f"/api/comparisons/{cmp['id']}").json()
+    assert full["title"] == "Email [EMAIL_1] a summary"  # titles never hold redacted values
+    assert [x["status"] for x in full["lanes"]] == ["done", "done"]
+    live = next(x for x in full["lanes"] if x["model_id"] == "fake-live")
+    assert live["content"].endswith("jane@acme.com.") and live["stats"]["cost_usd"] > 0
+    assert round(full["total_usd"], 6) == round(sum(x["stats"]["cost_usd"] for x in full["lanes"]), 6)
+    listed = client.get("/api/comparisons").json()
+    assert listed[0]["id"] == cmp["id"] and listed[0]["models"] == ["mock-a", "fake-live"]
+    assert client.get("/api/conversations").json() == []  # still not a chat
+    assert client.delete(f"/api/comparisons/{cmp['id']}").status_code == 204
+    assert client.get("/api/comparisons").json() == []
+
+
+def test_blocked_comparison_prompt_is_masked(client):
+    client.patch("/api/skills/pii-redaction", json={"config": {"preset": "small_team"}})
+    cmp = client.post("/api/comparisons", json={"models": ["mock-a", "fake-live"]}).json()
+    secret = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx"
+    stream(client, model="mock-a", message=f"why does {secret} fail", ephemeral=True, compare_id=cmp["id"])
+    full = client.get(f"/api/comparisons/{cmp['id']}").json()
+    assert secret not in str(full) and full["lanes"][0]["status"] == "blocked"
+
+
+def test_activity_links_usage_to_its_source(client):
+    _, events = stream(client, model="fake-live", message="Plan my week")
+    conv_id = events[0][1]["conversation_id"]
+    cmp = client.post("/api/comparisons", json={"models": ["fake-live", "mock-a"]}).json()
+    stream(client, model="fake-live", message="Compare this", ephemeral=True, compare_id=cmp["id"])
+    usage = [e for e in client.get("/api/billing").json()["ledger"] if e["kind"] == "usage"]
+    assert usage[0]["source_kind"] == "comparison" and usage[0]["source_id"] == cmp["id"]
+    assert usage[1]["source_kind"] == "chat" and usage[1]["source_id"] == conv_id
+    assert usage[1]["source_title"] == "Plan my week" and usage[1]["model_name"] == "Fake Live"
+    assert usage[1]["input_tokens"] == 150 and usage[1]["output_tokens"] == 20
+    client.delete(f"/api/conversations/{conv_id}")
+    usage = [e for e in client.get("/api/billing").json()["ledger"] if e["kind"] == "usage"]
+    assert usage[1]["source_title"] == "Deleted" and usage[1]["source_id"] is None
