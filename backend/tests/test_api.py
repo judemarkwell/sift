@@ -192,3 +192,13 @@ def test_context_trimmer(client, fake):
     assert step["status"] == "changed"
     sent = [m for m in fake.last_sent if m.role != "system"]
     assert sent[0].role == "user" and len(sent) < 7
+
+
+def test_model_is_told_not_to_dwell_on_placeholders_and_gets_shape_hints(client, fake):
+    client.patch("/api/skills/pii-redaction", json={"config": {"preset": "personal"}})
+    stream(client, model="fake-live", message="why does sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx fail from 10.0.0.5?")
+    system = next(m.content for m in fake.last_sent if m.role == "system")
+    assert "Don't mention placeholders" in system
+    assert "[API_KEY_1] is an Anthropic API key with the `sk-ant-api03-` prefix" in system
+    assert "AbCdEf" not in system  # hints never carry the secret
+    assert "[IP_ADDRESS_1]" not in system  # IPs are allowed in Personal, so not redacted at all

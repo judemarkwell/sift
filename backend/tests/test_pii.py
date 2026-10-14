@@ -119,3 +119,18 @@ def test_stream_restorer_doesnt_hold_forever():
 def test_scan_respects_policy():
     found = scan("jane@acme.com 10.0.0.1", PRESETS["personal"]["policy"], [P])
     assert [(f.kind, f.action) for f in found] == [("EMAIL", "redact")]  # IP is "allow" in Personal
+
+
+def test_shape_hints_are_useful_but_never_leak_the_secret():
+    from app.skills.pii.hints import hint
+
+    key = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx"
+    h = hint("API_KEY", key)
+    assert "Anthropic API key" in h and "`sk-ant-api03-`" in h and f"{len(key)} characters" in h
+    assert "AbCdEf" not in h
+    assert hint("IP_ADDRESS", "10.0.0.5") == "a private (internal network) address"
+    assert hint("IP_ADDRESS", "8.8.8.8") == "a public internet address"
+    assert "Visa" in hint("CREDIT_CARD", "4111 1111 1111 1111") and "1111" not in hint("CREDIT_CARD", "4111 1111 1111 1111")
+    assert hint("PASSWORD", "hunter22") == "a password of 8 characters using lowercase, digits"
+    assert hint("EMAIL", "jane@acme.com") == "an email address"  # no domain: it can identify a person
+    assert hint("PERSON", "Jane Doe") is None

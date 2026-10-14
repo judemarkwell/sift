@@ -8,14 +8,37 @@ from app.schema import PiiAction
 from app.skills.base import BaseSkill, PipelineContext, SkillManifest, StepResult
 from app.skills.pii.detectors import DETECTORS
 from app.skills.pii.entities import DEFAULT_PRESET, PRESETS, Policy, lower_label
-from app.skills.pii.redactor import StreamRestorer, redact_messages
+from app.skills.pii.hints import hint
+from app.skills.pii.redactor import PLACEHOLDER_RE, StreamRestorer, redact_messages
 
 PLACEHOLDER_NOTE = (
-    "Some values in this conversation were replaced with placeholders such as "
-    "[EMAIL_1] or [PHONE_2] to protect privacy. Treat each placeholder as the "
-    "real value it stands for, and when you refer to one, copy the placeholder "
-    "exactly, including the brackets."
+    "Privacy: the user's app replaced some sensitive values with placeholders such as [EMAIL_1] "
+    "or [API_KEY_1] before sending this conversation, and puts the real values back into your "
+    "reply before the user reads it. The user already knows this, so:\n"
+    "- Treat each placeholder as the real value and answer as specifically as you would if you "
+    "could see it.\n"
+    "- Don't mention placeholders, redaction, or that you can't see a value, and don't fall back "
+    "to generic advice because of it.\n"
+    "- When you refer to a value, write its placeholder exactly, including the brackets, so it "
+    "can be restored.\n"
+    "- If the exact characters of a value would really change your answer, say what to check "
+    "about it (for example \"make sure [API_KEY_1] was copied in full\") instead of saying you "
+    "can't see it."
 )
+
+
+def placeholder_note(vault, used: set[str]) -> str:
+    """The privacy note, plus safe shape hints for the placeholders in this request."""
+    lines = []
+    for ph in sorted(used):
+        value = vault.by_placeholder.get(ph)
+        kind = ph.strip("[]").rsplit("_", 1)[0]
+        h = hint(kind, value) if value is not None else None
+        if h:
+            lines.append(f"- {ph} is {h}.")
+    if not lines:
+        return PLACEHOLDER_NOTE
+    return PLACEHOLDER_NOTE + "\n\nWhat's known about these values (safe to rely on):\n" + "\n".join(lines)
 
 
 class PiiConfig(BaseModel):
@@ -80,7 +103,8 @@ class PiiRedactionSkill(BaseSkill):
         # Placeholders matter for every message (history is re-sent), but the
         # step reports only what's new in this turn so counts don't repeat.
         if any(f.action == "redact" for f in result.findings):
-            ctx.system_notes.append(PLACEHOLDER_NOTE)
+            used = {m.group(0) for msg in result.messages for m in PLACEHOLDER_RE.finditer(msg.content)}
+            ctx.system_notes.append(placeholder_note(ctx.vault, used))
             if config.restore_in_reply:
                 ctx.transformers.append(StreamRestorer(ctx.vault))
 
