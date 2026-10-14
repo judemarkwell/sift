@@ -1,12 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 
 import { api } from '@/lib/api'
-import type { ConversationSummary, Me, ModelInfo } from '@/lib/types'
+import type { ConversationSummary, Me, ModelInfo, StyleInfo } from '@/lib/types'
 
 interface AppData {
   me: Me | null
   models: ModelInfo[]
   conversations: ConversationSummary[]
+  styles: StyleInfo[]
   loadError: string | null
   refreshMe: () => Promise<void>
   refreshModels: () => Promise<void>
@@ -20,19 +21,20 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [models, setModels] = useState<ModelInfo[]>([])
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [styles, setStyles] = useState<StyleInfo[]>([])
 
   const refreshMe = useCallback(async () => setMe(await api.me()), [])
   const refreshModels = useCallback(async () => setModels(await api.models()), [])
   const refreshConversations = useCallback(async () => setConversations(await api.conversations()), [])
 
   useEffect(() => {
-    Promise.all([refreshMe(), refreshModels(), refreshConversations()]).catch((err: Error) =>
+    Promise.all([refreshMe(), refreshModels(), refreshConversations(), api.styles().then(setStyles)]).catch((err: Error) =>
       setLoadError(err.message),
     )
   }, [refreshMe, refreshModels, refreshConversations])
 
   return (
-    <Ctx.Provider value={{ me, models, conversations, loadError, refreshMe, refreshModels, refreshConversations }}>
+    <Ctx.Provider value={{ me, models, conversations, styles, loadError, refreshMe, refreshModels, refreshConversations }}>
       {children}
     </Ctx.Provider>
   )

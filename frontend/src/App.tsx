@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { ChatPage } from '@/components/chat/ChatPage'
 import { ComparePage } from '@/components/pages/ComparePage'
 import { PlansPage } from '@/components/pages/PlansPage'
+import { PrivacyPage } from '@/components/pages/PrivacyPage'
 import { SkillsPage } from '@/components/pages/SkillsPage'
 import { UsagePage } from '@/components/pages/UsagePage'
 import { Sidebar } from '@/components/Sidebar'
@@ -16,7 +17,14 @@ function Shell() {
   const openMenu = () => setMenuOpen(true)
 
   useEffect(() => {
-    const titles = { chat: 'Sift', compare: 'Compare · Sift', usage: 'Usage · Sift', skills: 'Skills · Sift', plans: 'Plan · Sift' }
+    const titles = {
+      chat: 'Sift',
+      compare: 'Compare · Sift',
+      usage: 'Usage · Sift',
+      skills: 'Skills · Sift',
+      plans: 'Plan · Sift',
+      privacy: 'Privacy · Sift',
+    }
     document.title = titles[route.page]
   }, [route.page])
 
@@ -43,7 +51,8 @@ function Shell() {
         {route.page === 'chat' && <ChatPage conversationId={route.id} onOpenMenu={openMenu} />}
         {route.page === 'compare' && <ComparePage onOpenMenu={openMenu} />}
         {route.page === 'usage' && <UsagePage onOpenMenu={openMenu} />}
-        {route.page === 'skills' && <SkillsPage onOpenMenu={openMenu} />}
+        {route.page === 'skills' && <SkillsPage sub={route.id} onOpenMenu={openMenu} />}
+        {route.page === 'privacy' && <PrivacyPage onOpenMenu={openMenu} />}
         {route.page === 'plans' && <PlansPage onOpenMenu={openMenu} />}
       </div>
     </div>

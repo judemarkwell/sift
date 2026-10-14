@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 
-export type Page = 'chat' | 'compare' | 'usage' | 'skills' | 'plans'
+export type Page = 'chat' | 'compare' | 'usage' | 'skills' | 'plans' | 'privacy'
 
 export interface Route {
   page: Page
   id?: string
 }
 
-const PAGES: Page[] = ['chat', 'compare', 'usage', 'skills', 'plans']
+const PAGES: Page[] = ['chat', 'compare', 'usage', 'skills', 'plans', 'privacy']
 
 export function parse(hash: string): Route {
   const [page, id] = hash.replace(/^#\/?/, '').split('/')

@@ -4,10 +4,12 @@ import remarkGfm from 'remark-gfm'
 import { ShieldAlert } from 'lucide-react'
 
 import { InfoLine } from '@/components/chat/InfoLine'
+import { Button } from '@/components/ui/button'
+import { useAppData } from '@/hooks/useAppData'
 import { renderMarked } from '@/lib/marks'
 import { href } from '@/lib/route'
 import { remarkRestored } from '@/lib/remark-restored'
-import { cn } from '@/lib/utils'
+import { cn, formatTokens } from '@/lib/utils'
 import type { ChatMessage, ModelInfo } from '@/lib/types'
 
 interface Props {
@@ -15,6 +17,8 @@ interface Props {
   models: ModelInfo[]
   selectedId: string | null
   onInspect: (messageId: string | null) => void
+  onContinue: (messageId: string) => void
+  busy: boolean
 }
 
 function Reply({ m }: { m: ChatMessage }) {
@@ -33,7 +37,9 @@ function Reply({ m }: { m: ChatMessage }) {
   )
 }
 
-export function MessageList({ messages, models, selectedId, onInspect }: Props) {
+export function MessageList({ messages, models, selectedId, onInspect, onContinue, busy }: Props) {
+  const { styles } = useAppData()
+  const styleLabel = (id: string) => styles.find((s) => s.id === id)?.label ?? id
   const endRef = useRef<HTMLDivElement>(null)
   const last = messages.at(-1)
   const byId = useMemo(() => new Map(models.map((m) => [m.id, m])), [models])
@@ -42,6 +48,7 @@ export function MessageList({ messages, models, selectedId, onInspect }: Props) 
     endRef.current?.scrollIntoView({ block: 'end' })
   }, [messages.length, last?.content, last?.status])
 
+  const lastId = messages.at(-1)?.id
   // For each reply, the model of the reply before it, to mark where the user switched models.
   const prevModelOf = useMemo(() => {
     const out = new Map<string, string | null>()
@@ -60,15 +67,42 @@ export function MessageList({ messages, models, selectedId, onInspect }: Props) 
         if (m.role === 'user') {
           const blocked = m.status === 'blocked'
           return (
-            <div key={m.id} className="mt-8 flex justify-end first:mt-0">
-              <div
-                className={cn(
-                  'max-w-[85%] whitespace-pre-wrap break-words rounded-xl rounded-br-sm px-4 py-2.5 text-[15px] leading-relaxed',
-                  blocked ? 'border border-dashed border-danger/50 bg-surface text-muted-foreground' : 'bg-muted',
-                )}
-              >
-                {renderMarked(m.content, m.marks)}
-              </div>
+            <div key={m.id} className="mt-8 flex flex-col items-end gap-1.5 first:mt-0">
+              {m.attachments.length > 0 && (
+                <div className="flex flex-wrap justify-end gap-2">
+                  {m.attachments.map((a) => (
+                    <a key={a.id} href={`/api/uploads/${a.id}`} target="_blank" rel="noreferrer" className="block">
+                      <img
+                        src={`/api/uploads/${a.id}`}
+                        alt={`Attached image, ${a.width}×${a.height}`}
+                        className="max-h-48 max-w-[16rem] rounded-lg border border-border object-cover"
+                      />
+                      <span className="mt-0.5 block text-right text-[11px] text-muted-foreground">
+                        {formatTokens(a.tokens)} tokens
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              )}
+              {m.content && (
+                <div
+                  className={cn(
+                    'max-w-[85%] whitespace-pre-wrap break-words rounded-xl rounded-br-sm px-4 py-2.5 text-[15px] leading-relaxed',
+                    blocked ? 'border border-dashed border-danger/50 bg-surface text-muted-foreground' : 'bg-muted',
+                  )}
+                >
+                  {renderMarked(m.content, m.marks)}
+                </div>
+              )}
+              {m.styles.length > 0 && (
+                <div className="flex flex-wrap justify-end gap-1">
+                  {m.styles.map((s) => (
+                    <span key={s} className="rounded bg-primary-soft px-1.5 py-0.5 text-[11px] font-medium text-ink/80">
+                      {styleLabel(s)}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )
         }
@@ -95,7 +129,7 @@ export function MessageList({ messages, models, selectedId, onInspect }: Props) 
                     <p className="mt-0.5 leading-relaxed text-ink/80">{m.error}</p>
                     <p className="mt-1.5 text-[13px] text-muted-foreground">
                       The blocked value was never sent to the model, and Sift didn't keep it.{' '}
-                      <a href={href({ page: 'skills' })} className="font-medium text-primary underline-offset-2 hover:underline">
+                      <a href={href({ page: 'skills', id: 'pipeline' })} className="font-medium text-primary underline-offset-2 hover:underline">
                         Review privacy settings
                       </a>
                     </p>
@@ -113,6 +147,16 @@ export function MessageList({ messages, models, selectedId, onInspect }: Props) 
                   {m.content ? `The reply stopped partway: ${m.error?.replace(/\.$/, '')}.` : m.error} Send your message again, or
                   switch models.
                 </p>
+              )}
+              {m.truncated && !m.streaming && m.status === 'done' && (
+                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-cost/40 bg-cost/5 px-3 py-2 text-[13px]">
+                  <span>This reply hit its length limit and stopped early.</span>
+                  {m.id === lastId && (
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => onContinue(m.id)}>
+                      Continue
+                    </Button>
+                  )}
+                </div>
               )}
               {marks.length > 0 && !m.streaming && (
                 <p className="mt-2 text-xs text-muted-foreground">

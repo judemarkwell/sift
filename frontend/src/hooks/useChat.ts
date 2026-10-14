@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { defaultModelId, useAppData } from '@/hooks/useAppData'
-import { ApiError, api, streamChat } from '@/lib/api'
+import { ApiError, api, streamChat, type StreamEvent } from '@/lib/api'
 import { navigate } from '@/lib/route'
-import type { ChatMessage, Trace } from '@/lib/types'
+import type { ChatMessage, ImageRef, StoredMessage, Trace } from '@/lib/types'
 
 const tempId = () => `tmp_${crypto.randomUUID().slice(0, 8)}`
 
@@ -12,18 +12,44 @@ export interface ChatError {
   code?: string
 }
 
+export interface SendOptions {
+  styles?: string[]
+  images?: ImageRef[]
+  skillId?: string
+  skillValues?: Record<string, string>
+}
+
+function blank(role: 'user' | 'assistant', content: string, modelId: string | null): ChatMessage {
+  return {
+    id: tempId(),
+    role,
+    content,
+    created_at: new Date().toISOString(),
+    model_id: modelId,
+    status: 'done',
+    error: null,
+    trace_id: null,
+    marks: [],
+    previous_trace_ids: [],
+    truncated: false,
+    styles: [],
+    attachments: [],
+  }
+}
+
 /** One conversation: loads it from the server, sends messages, and streams replies. */
 export function useChat(conversationId: string | undefined) {
   const { models, refreshConversations, refreshMe } = useAppData()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [modelId, setModelId] = useState('')
+  const [skillName, setSkillName] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [notFound, setNotFound] = useState(false)
   const [sendError, setSendError] = useState<ChatError | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  // The id of the conversation currently in `messages`, so navigating to a
-  // conversation we just created mid-stream doesn't reload and wipe it.
+  // The conversation currently in `messages`, so navigating to a chat we just
+  // created mid-stream doesn't reload and wipe it.
   const loadedRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
@@ -38,6 +64,7 @@ export function useChat(conversationId: string | undefined) {
     if (!conversationId) {
       loadedRef.current = undefined
       setMessages([])
+      setSkillName(null)
       setNotFound(false)
       if (models.length) setModelId(defaultModelId(models))
       return
@@ -51,6 +78,7 @@ export function useChat(conversationId: string | undefined) {
         loadedRef.current = conv.id
         setMessages(conv.messages)
         setModelId(conv.model_id)
+        setSkillName(conv.skill_name)
         setNotFound(false)
       })
       .catch(() => !cancelled && setNotFound(true))
@@ -66,75 +94,110 @@ export function useChat(conversationId: string | undefined) {
 
   const isStreaming = messages.some((m) => m.streaming)
 
-  const send = async (text: string) => {
-    const content = text.trim()
-    if (!content || isStreaming || !modelId) return
-    setSendError(null)
-    const now = new Date().toISOString()
-    const userId = tempId()
-    const replyId = tempId()
-    const base = { created_at: now, model_id: modelId, status: 'done' as const, error: null, trace_id: null, marks: [] }
-    setMessages((ms) => [
-      ...ms,
-      { ...base, id: userId, role: 'user', content, model_id: null },
-      { ...base, id: replyId, role: 'assistant', content: '', streaming: true },
-    ])
-
+  /** Shared streaming loop for new messages and Continue. */
+  const run = async (
+    body: Parameters<typeof streamChat>[0],
+    ids: { user: string | null; reply: string },
+    onRefused: () => void,
+  ): Promise<boolean> => {
     const controller = new AbortController()
     abortRef.current = controller
-    let convId = loadedRef.current
-    let userMsgId = userId
+    let userId = ids.user
     try {
       await streamChat(
-        { conversation_id: loadedRef.current ?? null, model: modelId, message: content },
-        (ev) => {
+        body,
+        (ev: StreamEvent) => {
           switch (ev.type) {
             case 'conversation':
               if (!loadedRef.current) {
-                convId = ev.conversation_id
                 loadedRef.current = ev.conversation_id
                 navigate({ page: 'chat', id: ev.conversation_id }, true)
               }
-              patch(userId, { id: ev.user_message_id })
-              userMsgId = ev.user_message_id
+              if (ev.skill_name) setSkillName(ev.skill_name)
+              if (userId && ev.user_message_id) {
+                patch(userId, { id: ev.user_message_id, styles: ev.styles ?? [] })
+                userId = ev.user_message_id
+              }
               break
             case 'start':
-              patch(replyId, { trace_id: ev.trace_id, context: ev.context, livePipeline: ev.pipeline })
-              patch(userMsgId, { marks: ev.prompt_marks })
+              patch(ids.reply, { context: ev.context, livePipeline: ev.pipeline })
+              if (userId) patch(userId, { marks: ev.prompt_marks })
               void refreshConversations()
               break
             case 'delta':
-              patch(replyId, (m) => ({ content: m.content + ev.text }))
+              patch(ids.reply, (m) => ({ content: m.content + ev.text }))
               break
             case 'done':
-            case 'error':
+            case 'error': {
+              const reply: StoredMessage = ev.message
               setMessages((ms) =>
                 ms.map((m) => {
-                  if (m.id === replyId) return { ...ev.message, trace: ev.trace }
-                  if (m.id === userMsgId) return { ...ev.user_message }
+                  if (m.id === ids.reply) return { ...reply, trace: ev.trace, streaming: false }
+                  if (userId && m.id === userId && ev.user_message) return { ...ev.user_message }
                   return m
                 }),
               )
+              if (ev.type === 'error' && body.continue_message_id) setSendError({ message: ev.error })
               break
+            }
           }
         },
         controller.signal,
       )
+      return true
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
-        patch(replyId, { streaming: false, status: 'error', error: 'Stopped before the reply finished.' })
-      } else {
-        // Refused before streaming (plan limits, budget): nothing was saved, so undo the optimistic messages.
-        setMessages((ms) => ms.filter((m) => m.id !== userMsgId && m.id !== replyId))
-        setSendError({ message: (err as Error).message, code: err instanceof ApiError ? err.code : undefined })
-        return content
+        patch(ids.reply, { streaming: false, status: 'error', error: 'Stopped before the reply finished.' })
+        return true
       }
+      onRefused()
+      setSendError({ message: (err as Error).message, code: err instanceof ApiError ? err.code : undefined })
+      return false
     } finally {
       abortRef.current = null
-      if (convId) void refreshConversations()
+      void refreshConversations()
       void refreshMe()
     }
-    return undefined
+  }
+
+  /** Send a message. Returns false if the server refused it before streaming (so the composer can keep the text). */
+  const send = async (text: string, opts: SendOptions = {}): Promise<boolean> => {
+    const content = text.trim()
+    const images = opts.images ?? []
+    if ((!content && !images.length && !opts.skillId) || isStreaming || !modelId) return false
+    setSendError(null)
+    const user = { ...blank('user', content, null), styles: opts.styles ?? [], attachments: images }
+    const reply = { ...blank('assistant', '', modelId), streaming: true }
+    if (opts.skillId) user.content = '…'
+    setMessages((ms) => [...ms, user, reply])
+    return run(
+      {
+        conversation_id: loadedRef.current ?? null,
+        model: modelId,
+        message: content,
+        styles: opts.styles,
+        image_ids: images.map((i) => i.id),
+        skill_id: opts.skillId,
+        skill_values: opts.skillValues,
+      },
+      { user: user.id, reply: reply.id },
+      () => setMessages((ms) => ms.filter((m) => m.id !== user.id && m.id !== reply.id)),
+    )
+  }
+
+  /** Ask the model to pick up a cut-off reply where it stopped; the text is appended in place. */
+  const continueReply = async (messageId: string) => {
+    if (isStreaming || !loadedRef.current) return
+    const target = messages.find((m) => m.id === messageId)
+    if (!target) return
+    setSendError(null)
+    const before = target
+    patch(messageId, { streaming: true, truncated: false })
+    await run(
+      { conversation_id: loadedRef.current, model: modelId, continue_message_id: messageId },
+      { user: null, reply: messageId },
+      () => patch(messageId, { ...before, streaming: false }),
+    )
   }
 
   const stop = () => abortRef.current?.abort()
@@ -145,7 +208,7 @@ export function useChat(conversationId: string | undefined) {
   const inspect = async (messageId: string | null) => {
     setSelectedId(messageId)
     const m = messages.find((x) => x.id === messageId)
-    if (m && !m.trace && m.trace_id && !m.streaming) {
+    if (m && (!m.trace || m.trace.id !== m.trace_id) && m.trace_id && !m.streaming) {
       try {
         const trace: Trace = await api.trace(m.trace_id)
         patch(m.id, { trace })
@@ -159,12 +222,14 @@ export function useChat(conversationId: string | undefined) {
     messages,
     modelId,
     setModelId,
+    skillName,
     loading,
     notFound,
     isStreaming,
     sendError,
     clearSendError: () => setSendError(null),
     send,
+    continueReply,
     stop,
     selected,
     inspect,

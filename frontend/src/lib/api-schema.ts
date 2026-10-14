@@ -142,6 +142,182 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/styles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Styles */
+        get: operations["list_styles_api_styles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Upload Quota */
+        get: operations["upload_quota_api_uploads_quota_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Image */
+        post: operations["upload_image_api_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Upload */
+        get: operations["get_upload_api_uploads__upload_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompt-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Prompt Skills */
+        get: operations["list_prompt_skills_api_prompt_skills_get"];
+        put?: never;
+        /** Create Prompt Skill */
+        post: operations["create_prompt_skill_api_prompt_skills_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompt-skills/{skill_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Prompt Skill */
+        put: operations["update_prompt_skill_api_prompt_skills__skill_id__put"];
+        post?: never;
+        /** Delete Prompt Skill */
+        delete: operations["delete_prompt_skill_api_prompt_skills__skill_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/privacy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Privacy */
+        get: operations["get_privacy_api_account_privacy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Privacy */
+        patch: operations["patch_privacy_api_account_privacy_patch"];
+        trace?: never;
+    };
+    "/api/account/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Data
+         * @description Everything Sift holds about the caller, in one JSON file (data portability).
+         */
+        get: operations["export_data_api_account_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete Data */
+        post: operations["delete_data_api_account_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Audit Log */
+        get: operations["audit_log_api_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/skills": {
         parameters: {
             query?: never;
@@ -302,13 +478,21 @@ export interface components {
             cost: components["schemas"]["Cost"];
             timing: components["schemas"]["Timing"];
         };
+        /** Body_upload_image_api_uploads_post */
+        Body_upload_image_api_uploads_post: {
+            /** File */
+            file: string;
+        };
         /** ChatRequest */
         ChatRequest: {
             /** Conversation Id */
             conversation_id?: string | null;
             /** Model */
             model: string;
-            /** Message */
+            /**
+             * Message
+             * @default
+             */
             message: string;
             /**
              * Ephemeral
@@ -316,6 +500,18 @@ export interface components {
              * @default false
              */
             ephemeral: boolean;
+            /** Styles */
+            styles?: string[];
+            /** Image Ids */
+            image_ids?: string[];
+            /** Skill Id */
+            skill_id?: string | null;
+            /** Skill Values */
+            skill_values?: {
+                [key: string]: string;
+            };
+            /** Continue Message Id */
+            continue_message_id?: string | null;
         };
         /** CheckoutRequest */
         CheckoutRequest: {
@@ -374,6 +570,12 @@ export interface components {
             updated_at?: string;
             /** Messages */
             messages?: components["schemas"]["StoredMessage"][];
+            /** Skill Id */
+            skill_id?: string | null;
+            /** Skill Name */
+            skill_name?: string | null;
+            /** Skill Note */
+            skill_note?: string | null;
         };
         /** ConversationPatch */
         ConversationPatch: {
@@ -399,6 +601,8 @@ export interface components {
             message_count: number;
             /** Spend Usd */
             spend_usd: number;
+            /** Skill Name */
+            skill_name?: string | null;
         };
         /** Cost */
         Cost: {
@@ -427,6 +631,11 @@ export interface components {
              * @default 0
              */
             uncached_usd: number;
+        };
+        /** DeleteRequest */
+        DeleteRequest: {
+            /** Confirm */
+            confirm: string;
         };
         /**
          * Finding
@@ -461,6 +670,23 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * ImageRef
+         * @description An uploaded image attached to a message. Bytes live in storage; logs
+         *     and traces only ever hold this reference.
+         */
+        ImageRef: {
+            /** Id */
+            id: string;
+            /** Media Type */
+            media_type: string;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Tokens */
+            tokens: number;
+        };
         /** Message */
         Message: {
             /**
@@ -470,6 +696,8 @@ export interface components {
             role: "system" | "user" | "assistant";
             /** Content */
             content: string;
+            /** Images */
+            images?: components["schemas"]["ImageRef"][];
         };
         /** ModelView */
         ModelView: {
@@ -506,6 +734,18 @@ export interface components {
              * @default false
              */
             live: boolean;
+            /**
+             * Vision
+             * @description Accepts images
+             * @default true
+             */
+            vision: boolean;
+            /**
+             * Max Output Tokens
+             * @description Longest reply the model can produce
+             * @default 64000
+             */
+            max_output_tokens: number;
             /** Allowed */
             allowed: boolean;
             /** Required Plan */
@@ -542,10 +782,80 @@ export interface components {
             /** Findings */
             findings?: components["schemas"]["Finding"][];
         };
+        /** PrivacyPatch */
+        PrivacyPatch: {
+            /** Retention Days */
+            retention_days: number | null;
+        };
+        /** PromptSkillIn */
+        PromptSkillIn: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Icon
+             * @default sparkles
+             */
+            icon: string;
+            /** Instructions */
+            instructions: string;
+            /** Fields */
+            fields?: components["schemas"]["SkillField"][];
+            /**
+             * Starter
+             * @default
+             */
+            starter: string;
+            /** Styles */
+            styles?: string[];
+            /** Model Id */
+            model_id?: string | null;
+            /**
+             * Ask For Missing
+             * @default true
+             */
+            ask_for_missing: boolean;
+            /**
+             * Shared
+             * @default false
+             */
+            shared: boolean;
+            /**
+             * Pinned
+             * @default true
+             */
+            pinned: boolean;
+        };
         /** ScanRequest */
         ScanRequest: {
             /** Text */
             text: string;
+        };
+        /** SkillField */
+        SkillField: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Placeholder
+             * @default
+             */
+            placeholder: string;
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            /**
+             * Multiline
+             * @default false
+             */
+            multiline: boolean;
         };
         /** SkillPatch */
         SkillPatch: {
@@ -591,6 +901,17 @@ export interface components {
             error?: string | null;
             /** Trace Id */
             trace_id?: string | null;
+            /** Previous Trace Ids */
+            previous_trace_ids?: string[];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Styles */
+            styles?: string[];
+            /** Attachments */
+            attachments?: components["schemas"]["ImageRef"][];
             /** Marks */
             marks?: components["schemas"]["Finding"][];
         };
@@ -998,6 +1319,424 @@ export interface operations {
                 "application/json": components["schemas"]["ChatRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_styles_api_styles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    upload_quota_api_uploads_quota_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_image_api_uploads_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_image_api_uploads_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_upload_api_uploads__upload_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_prompt_skills_api_prompt_skills_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_prompt_skill_api_prompt_skills_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptSkillIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_prompt_skill_api_prompt_skills__skill_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptSkillIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_prompt_skill_api_prompt_skills__skill_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_privacy_api_account_privacy_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_privacy_api_account_privacy_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrivacyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_data_api_account_export_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_data_api_account_delete_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audit_log_api_audit_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

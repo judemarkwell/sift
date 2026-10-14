@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react'
-import { Download, Menu } from 'lucide-react'
+import { Download, Menu, Sparkles } from 'lucide-react'
 
 import { Composer } from '@/components/chat/Composer'
+import { SkillLauncher } from '@/components/chat/SkillLauncher'
 import { MessageList } from '@/components/chat/MessageList'
 import { TracePanel } from '@/components/chat/TracePanel'
 import { ModelPicker } from '@/components/ModelPicker'
@@ -13,7 +14,7 @@ import { href } from '@/lib/route'
 
 const SUGGESTIONS = [
   { text: 'Draft a reply to jane.doe@acme.com confirming Thursday. My cell is (502) 555-0142.', note: 'see PII redaction work' },
-  { text: 'Compare two approaches to caching API responses /long', note: 'a longer, pricier reply' },
+  { text: '/tldr What is the difference between a process and a thread?', note: 'try an output style' },
   { text: 'Here is my key sk-ant-api03-AbCdEfGhIjKlMnOp, why does it fail?', note: 'a secret Sift catches' },
 ]
 
@@ -21,6 +22,7 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
   const { models } = useAppData()
   const chat = useChat(conversationId)
   const [prefill, setPrefill] = useState<string | null>(null)
+  const [skillFormOpen, setSkillFormOpen] = useState(false)
   const clearPrefill = useCallback(() => setPrefill(null), [])
   const model = models.find((m) => m.id === chat.modelId)
   const selectedModel = models.find((m) => m.id === chat.selected?.model_id)
@@ -42,6 +44,15 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
             <Menu />
           </Button>
           <ModelPicker models={models} value={chat.modelId} onChange={chat.setModelId} disabled={chat.isStreaming} />
+          {chat.skillName && (
+            <span
+              className="hidden items-center gap-1.5 truncate rounded-md bg-primary-soft px-2 py-1 text-[12.5px] font-medium sm:inline-flex"
+              title="This chat follows a saved skill's instructions on every turn"
+            >
+              <Sparkles className="size-3.5 text-primary" />
+              {chat.skillName}
+            </span>
+          )}
           <div className="flex-1" />
           {conversationId && chat.messages.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => void exportReport()} title="Download this conversation as a transparency report">
@@ -59,7 +70,9 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
               </p>
             </div>
           ) : chat.messages.length === 0 && !chat.loading ? (
-            <div className="mx-auto flex h-full max-w-[44rem] flex-col justify-center px-6 pb-12">
+            <div className="mx-auto flex min-h-full max-w-[44rem] flex-col justify-center px-6 py-10">
+{!skillFormOpen && (
+                <>
               <h1 className="max-w-[30rem] text-[30px] font-semibold leading-[1.15] tracking-[-0.015em]">
                 Ask anything. See everything it took.
               </h1>
@@ -81,6 +94,9 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
                   </li>
                 ))}
               </ul>
+                </>
+              )}
+              <SkillLauncher onStart={chat.send} onOpenChange={setSkillFormOpen} />
             </div>
           ) : (
             <MessageList
@@ -88,6 +104,8 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
               models={models}
               selectedId={chat.selected?.id ?? null}
               onInspect={(id) => void chat.inspect(id)}
+              onContinue={(id) => void chat.continueReply(id)}
+              busy={chat.isStreaming}
             />
           )}
         </div>

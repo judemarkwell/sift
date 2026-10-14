@@ -25,6 +25,7 @@ The app still runs on local stand-ins for three AWS pieces. Each has a documente
 | Sign-in | One local admin user (`app/auth.py`) | Implement `CognitoVerifier` (JWKS check) and a sign-in screen (Amplify Auth or Cognito Hosted UI) |
 | PII names | `MockComprehendClient` | Pass `boto3.client("comprehend")` to `ComprehendDetector` |
 | Payments | `MockPayments` (test mode) | Stripe Checkout + a `checkout.session.completed` webhook |
+| Image uploads | Bytes in SQLite (`uploads` table) | A private S3 bucket (SSE-KMS, lifecycle rule matching retention); keep only metadata in DynamoDB |
 
 ## Deploy
 

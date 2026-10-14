@@ -13,6 +13,13 @@ import type {
   StoredMessage,
   Trace,
   UsageResponse,
+  AuditEntry,
+  ImageQuota,
+  PromptSkill,
+  PromptSkillInput,
+  PromptSkillsResponse,
+  StyleInfo,
+  UploadedImage,
 } from './types'
 
 /** An API error with the server's message and, for plan limits, a code. */
@@ -69,10 +76,39 @@ export const api = {
     request<CheckoutSession>('/api/billing/checkout', { method: 'POST', json: body }),
   completeCheckout: (id: string) =>
     request<BillingResponse>(`/api/billing/checkout/${id}/complete`, { method: 'POST' }),
+  styles: () => request<StyleInfo[]>('/api/styles'),
+  imageQuota: () => request<ImageQuota>('/api/uploads/quota'),
+  upload: (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<UploadedImage>('/api/uploads', { method: 'POST', body })
+  },
+  promptSkills: () => request<PromptSkillsResponse>('/api/prompt-skills'),
+  createPromptSkill: (s: PromptSkillInput) => request<PromptSkill>('/api/prompt-skills', { method: 'POST', json: s }),
+  updatePromptSkill: (id: string, s: PromptSkillInput) =>
+    request<PromptSkill>(`/api/prompt-skills/${id}`, { method: 'PUT', json: s }),
+  deletePromptSkill: (id: string) => request<void>(`/api/prompt-skills/${id}`, { method: 'DELETE' }),
+  privacy: () => request<{ retention_days: number | null; choices: (number | null)[] }>('/api/account/privacy'),
+  setRetention: (retention_days: number | null) =>
+    request<{ retention_days: number | null }>('/api/account/privacy', { method: 'PATCH', json: { retention_days } }),
+  exportData: () => request<string>('/api/account/export'),
+  deleteData: () =>
+    request<{ deleted: Record<string, number>; kept: string }>('/api/account/delete', {
+      method: 'POST',
+      json: { confirm: 'DELETE' },
+    }),
+  audit: () => request<AuditEntry[]>('/api/audit'),
 }
 
 export type StreamEvent =
-  | { type: 'conversation'; conversation_id: string; user_message_id: string }
+  | {
+      type: 'conversation'
+      conversation_id: string
+      user_message_id: string | null
+      styles?: string[]
+      skill_name?: string | null
+      continuing?: string
+    }
   | {
       type: 'start'
       trace_id: string
@@ -82,15 +118,32 @@ export type StreamEvent =
       pipeline: PipelineStep[]
     }
   | { type: 'delta'; text: string }
-  | { type: 'done'; trace: Trace; message: StoredMessage; user_message: StoredMessage }
-  | { type: 'error'; error: string; blocked: boolean; trace: Trace; message: StoredMessage; user_message: StoredMessage }
+  | { type: 'done'; trace: Trace; message: StoredMessage; user_message: StoredMessage | null }
+  | {
+      type: 'error'
+      error: string
+      blocked: boolean
+      trace: Trace
+      message: StoredMessage
+      user_message: StoredMessage | null
+    }
 
 /**
  * POST to the streaming endpoint and parse Server-Sent Events.
  * (EventSource only supports GET, so we read the body stream ourselves.)
  */
 export async function streamChat(
-  body: { conversation_id?: string | null; model: string; message: string; ephemeral?: boolean },
+  body: {
+    conversation_id?: string | null
+    model: string
+    message?: string
+    ephemeral?: boolean
+    styles?: string[]
+    image_ids?: string[]
+    skill_id?: string
+    skill_values?: Record<string, string>
+    continue_message_id?: string
+  },
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

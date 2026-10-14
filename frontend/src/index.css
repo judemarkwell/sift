@@ -22,10 +22,12 @@
   --series-6: #008300;
   --series-7: #6250d6;
   --series-8: #e34948;
+  color-scheme: light;
 }
 
+/* Dark theme: follows the system unless the user picked Light or Dark (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --ground: #12171d;
     --surface: #1a2129;
     --ink: #e6eaee;
@@ -45,7 +47,30 @@
     --series-6: #008300;
     --series-7: #9085e9;
     --series-8: #e66767;
+    color-scheme: dark;
   }
+}
+:root[data-theme='dark'] {
+  --ground: #12171d;
+  --surface: #1a2129;
+  --ink: #e6eaee;
+  --muted-ink: #93a0ad;
+  --line: #2b3540;
+  --tint: #232c36;
+  --accent: #72b6b2;
+  --accent-ink: #0f1a1b;
+  --accent-soft: #1f3638;
+  --cost: #e0b25a;
+  --danger: #ec8a78;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  color-scheme: dark;
 }
 
 @theme inline {

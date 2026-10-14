@@ -1,8 +1,9 @@
-import { BarChart3, Columns2, CreditCard, Plus, SlidersHorizontal, X } from 'lucide-react'
+import { BarChart3, Columns2, CreditCard, Monitor, Moon, Plus, Shield, Sparkles, Sun, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
 import { href, type Route } from '@/lib/route'
+import { useTheme, type Theme } from '@/lib/theme'
 import { cn, formatCost } from '@/lib/utils'
 
 interface Props {
@@ -14,12 +15,14 @@ interface Props {
 const NAV = [
   { page: 'compare', label: 'Compare models', icon: Columns2 },
   { page: 'usage', label: 'Usage', icon: BarChart3 },
-  { page: 'skills', label: 'Skills', icon: SlidersHorizontal },
+  { page: 'skills', label: 'Skills', icon: Sparkles },
   { page: 'plans', label: 'Plan & billing', icon: CreditCard },
+  { page: 'privacy', label: 'Privacy & data', icon: Shield },
 ] as const
 
 export function Sidebar({ route, open, onClose }: Props) {
   const { conversations, me } = useAppData()
+  const [theme, setTheme] = useTheme()
 
   return (
     <>
@@ -84,7 +87,10 @@ export function Sidebar({ route, open, onClose }: Props) {
                     active && 'bg-muted font-medium',
                   )}
                 >
-                  <span className="truncate">{c.title}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {c.skill_name && <Sparkles className="size-3.5 shrink-0 text-primary" aria-label="Skill chat" />}
+                    <span className="truncate">{c.title}</span>
+                  </span>
                   {c.spend_usd > 0 && <span className="shrink-0 text-xs font-normal text-cost">{formatCost(c.spend_usd)}</span>}
                 </a>
               </li>
@@ -92,11 +98,39 @@ export function Sidebar({ route, open, onClose }: Props) {
           })}
         </ul>
 
+        <div className="flex items-center justify-between border-t border-border px-5 py-2.5">
+          <span className="text-xs text-muted-foreground">Theme</span>
+          <div role="radiogroup" aria-label="Theme" className="flex rounded-md border border-border bg-muted p-0.5">
+            {(
+              [
+                { v: 'system', icon: Monitor, label: 'Match system' },
+                { v: 'light', icon: Sun, label: 'Light' },
+                { v: 'dark', icon: Moon, label: 'Dark' },
+              ] as { v: Theme; icon: typeof Sun; label: string }[]
+            ).map(({ v, icon: Icon, label }) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={theme === v}
+                aria-label={label}
+                title={label}
+                onClick={() => setTheme(v)}
+                className={cn(
+                  'grid size-7 place-items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-ring',
+                  theme === v ? 'bg-surface text-ink shadow-[0_1px_2px_rgb(28_36_48/0.12)]' : 'text-muted-foreground hover:text-ink',
+                )}
+              >
+                <Icon className="size-3.5" />
+              </button>
+            ))}
+          </div>
+        </div>
         {me && (
           <a
             href={href({ page: 'plans' })}
             onClick={onClose}
-            className="block border-t border-border px-5 py-4 text-xs text-muted-foreground hover:bg-muted"
+            className="block border-t border-border px-5 py-3.5 text-xs text-muted-foreground hover:bg-muted"
           >
             <span className="flex items-baseline justify-between">
               <span className="font-medium text-ink">{me.plan_name} plan</span>

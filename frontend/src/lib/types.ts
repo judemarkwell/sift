@@ -192,3 +192,79 @@ export interface UsageResponse {
     ephemeral: boolean
   }[]
 }
+
+export type ImageRef = Req<S['ImageRef']>
+export type SkillField = Req<S['SkillField']>
+export interface PromptSkill {
+  id: string
+  org_id: string
+  owner_id: string
+  name: string
+  description: string
+  icon: string
+  instructions: string
+  fields: SkillField[]
+  starter: string
+  styles: string[]
+  model_id: string | null
+  ask_for_missing: boolean
+  shared: boolean
+  pinned: boolean
+  use_count: number
+  created_at: string
+  updated_at: string
+  mine: boolean
+}
+
+export interface StyleInfo {
+  id: string
+  label: string
+  group: 'Length' | 'Format' | 'Purpose' | 'Tone'
+  description: string
+  max_tokens: number | null
+}
+
+export interface ImageQuota {
+  per_day: number
+  used_today: number
+  remaining: number
+}
+
+export interface UploadedImage extends ImageRef {
+  bytes: number
+  original: { width: number; height: number; bytes: number }
+  resized: boolean
+  metadata_removed: boolean
+  quota: ImageQuota
+}
+
+export interface PromptSkillTemplate {
+  name: string
+  description: string
+  icon: string
+  instructions: string
+  fields: SkillField[]
+  starter: string
+  styles: string[]
+}
+
+export interface PromptSkillsResponse {
+  skills: PromptSkill[]
+  templates: PromptSkillTemplate[]
+  icons: string[]
+  limit: number | null
+  can_share: boolean
+}
+
+export type PromptSkillInput = Pick<
+  PromptSkill,
+  'name' | 'description' | 'icon' | 'instructions' | 'fields' | 'starter' | 'styles' | 'ask_for_missing' | 'shared' | 'pinned'
+> & { model_id?: string | null }
+
+export interface AuditEntry {
+  created_at: string
+  actor: string
+  action: string
+  target: string
+  detail: Record<string, unknown>
+}

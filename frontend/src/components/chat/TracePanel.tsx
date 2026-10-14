@@ -29,7 +29,7 @@ const STATUS: Record<PipelineStep['status'], { label: string; tone: string } | n
   error: { label: 'Error', tone: 'bg-danger/15 text-danger' },
 }
 
-const SEGMENT_SHADES = ['bg-primary/35', 'bg-primary/60', 'bg-primary']
+const SEGMENT_SHADES = ['bg-primary/35', 'bg-primary/60', 'bg-primary', 'bg-cost/70']
 
 function Figure({ label, value, tone }: { label: string; value: string; tone?: 'cost' }) {
   return (
@@ -102,7 +102,7 @@ function Sieve({ trace }: { trace: Trace }) {
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="flex items-center gap-2 text-[13.5px] font-medium">
                         {s.skill_id ? (
-                          <a href={href({ page: 'skills' })} className="hover:underline" title="Open skill settings">
+                          <a href={href({ page: 'skills', id: 'pipeline' })} className="hover:underline" title="Open skill settings">
                             {s.name}
                           </a>
                         ) : (
