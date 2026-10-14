@@ -217,6 +217,8 @@ class Conversation(BaseModel):
     # The skill's instructions as they were when the chat started, so editing
     # or deleting the skill never changes a conversation already in progress.
     skill_note: str | None = None
+    # In the PIN-protected secure folder: hidden from lists until unlocked.
+    secure: bool = False
 
 
 class ConversationSummary(BaseModel):
@@ -227,6 +229,7 @@ class ConversationSummary(BaseModel):
     message_count: int
     spend_usd: float
     skill_name: str | None = None
+    secure: bool = False
 
 
 class Principal(BaseModel):

@@ -22,7 +22,9 @@ import type {
   PromptSkillsResponse,
   StyleInfo,
   UploadedImage,
+  SecureStatus,
 } from './types'
+import { unlockHeaders } from './unlock-token'
 
 /** An API error with the server's message and, for plan limits, a code. */
 export class ApiError extends Error {
@@ -49,7 +51,10 @@ async function request<T>(path: string, init?: RequestInit & { json?: unknown })
   const { json, ...rest } = init ?? {}
   const res = await fetch(path, {
     ...rest,
-    headers: json !== undefined ? { 'Content-Type': 'application/json' } : rest.headers,
+    headers: {
+      ...(json !== undefined ? { 'Content-Type': 'application/json' } : (rest.headers as Record<string, string>)),
+      ...unlockHeaders(),
+    },
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   })
   if (!res.ok) throw await errorFrom(res)
@@ -65,6 +70,8 @@ export const api = {
   conversation: (id: string) => request<Conversation>(`/api/conversations/${id}`),
   renameConversation: (id: string, title: string) =>
     request<ConversationSummary>(`/api/conversations/${id}`, { method: 'PATCH', json: { title } }),
+  setConversationSecure: (id: string, secure: boolean) =>
+    request<ConversationSummary>(`/api/conversations/${id}`, { method: 'PATCH', json: { secure } }),
   deleteConversation: (id: string) => request<void>(`/api/conversations/${id}`, { method: 'DELETE' }),
   report: (id: string) => request<string>(`/api/conversations/${id}/report`),
   trace: (id: string) => request<Trace>(`/api/traces/${id}`),
@@ -100,6 +107,11 @@ export const api = {
       json: { confirm: 'DELETE' },
     }),
   audit: () => request<AuditEntry[]>('/api/audit'),
+  secureStatus: () => request<SecureStatus>('/api/secure'),
+  setPin: (pin: string) => request<{ token: string }>('/api/secure/pin', { method: 'POST', json: { pin } }),
+  unlock: (pin: string) => request<{ token: string }>('/api/secure/unlock', { method: 'POST', json: { pin } }),
+  lockSecure: () => request<void>('/api/secure/lock', { method: 'POST' }),
+  secureConversations: () => request<ConversationSummary[]>('/api/secure/conversations'),
   comparisons: () => request<ComparisonSummary[]>('/api/comparisons'),
   comparison: (id: string) => request<Comparison>(`/api/comparisons/${id}`),
   createComparison: (models: string[]) => request<Comparison>('/api/comparisons', { method: 'POST', json: { models } }),
@@ -150,13 +162,14 @@ export async function streamChat(
     skill_values?: Record<string, string>
     continue_message_id?: string
     compare_id?: string
+    secure?: boolean
   },
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch('/api/chat/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...unlockHeaders() },
     body: JSON.stringify(body),
     signal,
   })

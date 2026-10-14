@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -29,6 +29,7 @@ from app.providers.base import CONTINUE_PROMPT
 from app.styles import STYLE_BY_ID, STYLES, parse_styles
 from app.gateway import BudgetExceededError, Delta, Failed, Finished, Started, UnknownModelError
 from app.report import conversation_report
+from app.secure import PinError
 from app.schema import (
     Comparison,
     ComparisonLane,
@@ -132,65 +133,162 @@ def _summary(conv: Conversation, a: App) -> ConversationSummary:
         message_count=len(conv.messages),
         spend_usd=spend,
         skill_name=conv.skill_name,
+        secure=conv.secure,
     )
+
+
+def unlocked(p: Principal = Depends(current_principal), a: App = Depends(get_app),
+             x_sift_unlock: str | None = Header(default=None)) -> bool:
+    """Whether this request carries a valid secure-folder unlock token."""
+    return a.secure.is_unlocked(p.user_id, x_sift_unlock)
+
+
+SECURE_LOCKED = {"message": "This chat is in your secure folder. Enter your PIN to open it.", "code": "secure_locked"}
 
 
 @app.get("/api/conversations", response_model=list[ConversationSummary])
 def list_conversations(p: Principal = Depends(current_principal), a: App = Depends(get_app)):
     _enforce_retention(p, a)
-    return [_summary(c, a) for c in a.storage.list_conversations(p.org_id, p.user_id)]
+    # Secure chats never appear here, locked or not; they have their own list.
+    return [_summary(c, a) for c in a.storage.list_conversations(p.org_id, p.user_id) if not c.secure]
 
 
-def _own_conversation(p: Principal, a: App, conv_id: str) -> Conversation:
+def _own_conversation(p: Principal, a: App, conv_id: str, is_unlocked: bool) -> Conversation:
     conv = a.storage.get_conversation(p.org_id, conv_id)
     if not conv or conv.user_id != p.user_id:
         raise HTTPException(404, "Conversation not found")
+    if conv.secure and not is_unlocked:
+        raise HTTPException(423, SECURE_LOCKED)
     return conv
 
 
 @app.get("/api/conversations/{conv_id}", response_model=Conversation)
-def get_conversation(conv_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
-    return _own_conversation(p, a, conv_id)
+def get_conversation(conv_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app),
+                     ok: bool = Depends(unlocked)):
+    return _own_conversation(p, a, conv_id, ok)
 
 
 class ConversationPatch(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=120)
     model_id: str | None = None
+    secure: bool | None = Field(None, description="Move into (true) or out of (false) the secure folder")
 
 
 @app.patch("/api/conversations/{conv_id}", response_model=ConversationSummary)
 def patch_conversation(conv_id: str, body: ConversationPatch, p: Principal = Depends(current_principal),
-                       a: App = Depends(get_app)):
-    conv = _own_conversation(p, a, conv_id)
+                       a: App = Depends(get_app), ok: bool = Depends(unlocked)):
+    conv = _own_conversation(p, a, conv_id, ok)  # changing a secure chat (incl. moving it out) needs the PIN
     if body.title:
         conv.title = body.title.strip()
     if body.model_id:
         a.gateway.resolve(body.model_id)
         conv.model_id = body.model_id
+    if body.secure is not None and body.secure != conv.secure:
+        if body.secure:
+            # Moving in needs no PIN entry, so a chat can be hidden in one click.
+            _require_secure_folder(p, a)
+            audit(a, p, "secure.move_in", conv.id)
+        else:
+            audit(a, p, "secure.move_out", conv.id)
+        conv.secure = body.secure
     a.storage.put_conversation(conv)
     return _summary(conv, a)
 
 
+def _require_secure_folder(p: Principal, a: App) -> None:
+    if not a.skill_settings(p)["secure-folder"].enabled:
+        raise HTTPException(400, {"message": "Turn on the Secure folder skill first.", "code": "secure_disabled"})
+    if not a.secure.pin_set(p.user_id):
+        raise HTTPException(409, {"message": "Set a PIN for your secure folder first.", "code": "pin_required"})
+
+
 @app.delete("/api/conversations/{conv_id}", status_code=204)
-def delete_conversation(conv_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
-    _own_conversation(p, a, conv_id)
+def delete_conversation(conv_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app),
+                        ok: bool = Depends(unlocked)):
+    _own_conversation(p, a, conv_id, ok)
     a.storage.delete_conversation(p.org_id, conv_id)
 
 
 @app.get("/api/conversations/{conv_id}/report", response_class=PlainTextResponse)
-def report(conv_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
-    conv = _own_conversation(p, a, conv_id)
+def report(conv_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app),
+           ok: bool = Depends(unlocked)):
+    conv = _own_conversation(p, a, conv_id, ok)
     traces = {t.id: t for t in a.storage.list_traces(p.org_id, conversation_id=conv.id)}
     models = {m.id: m for m in a.gateway.models()}
     return conversation_report(conv, traces, models)
 
 
 @app.get("/api/traces/{trace_id}", response_model=Trace)
-def get_trace(trace_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+def get_trace(trace_id: str, p: Principal = Depends(current_principal), a: App = Depends(get_app),
+              ok: bool = Depends(unlocked)):
     trace = a.storage.get_trace(p.org_id, trace_id)
     if not trace or trace.user_id != p.user_id:
         raise HTTPException(404, "Trace not found")
+    if not trace.ephemeral:
+        conv = a.storage.get_conversation(p.org_id, trace.conversation_id)
+        if conv and conv.secure and not ok:
+            raise HTTPException(423, SECURE_LOCKED)
     return trace
+
+
+# ---- secure folder -----------------------------------------------------------------
+
+
+class PinIn(BaseModel):
+    pin: str = Field(min_length=4, max_length=8)
+
+
+def _pin_error(exc: PinError) -> HTTPException:
+    status = {"pin_lockout": 429, "pin_wrong": 401, "pin_exists": 409, "pin_required": 409}.get(exc.code, 400)
+    detail = {"message": str(exc), "code": exc.code}
+    if exc.retry_after:
+        detail["retry_after_seconds"] = exc.retry_after
+    return HTTPException(status, detail)
+
+
+@app.get("/api/secure")
+def secure_status(p: Principal = Depends(current_principal), a: App = Depends(get_app),
+                  x_sift_unlock: str | None = Header(default=None)):
+    s = a.secure.status(p.user_id, x_sift_unlock)
+    has_chats = any(c.secure for c in a.storage.list_conversations(p.org_id, p.user_id, 10_000))
+    enabled = a.skill_settings(p)["secure-folder"].enabled
+    return {"enabled": enabled, "visible": enabled or has_chats, "pin_set": s.pin_set,
+            "unlocked": s.unlocked, "retry_after_seconds": s.retry_after_seconds}
+
+
+@app.post("/api/secure/pin")
+def secure_set_pin(body: PinIn, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+    try:
+        token = a.secure.set_pin(p.user_id, body.pin)
+    except PinError as exc:
+        raise _pin_error(exc) from exc
+    audit(a, p, "secure.pin_set")
+    return {"token": token}
+
+
+@app.post("/api/secure/unlock")
+def secure_unlock(body: PinIn, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+    try:
+        token = a.secure.unlock(p.user_id, body.pin)
+    except PinError as exc:
+        if exc.code in ("pin_wrong", "pin_lockout"):
+            audit(a, p, "secure.unlock_failed", detail=exc.code)
+        raise _pin_error(exc) from exc
+    return {"token": token}
+
+
+@app.post("/api/secure/lock", status_code=204)
+def secure_lock(p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+    a.secure.lock(p.user_id)
+
+
+@app.get("/api/secure/conversations", response_model=list[ConversationSummary])
+def list_secure_conversations(p: Principal = Depends(current_principal), a: App = Depends(get_app),
+                              ok: bool = Depends(unlocked)):
+    if not ok:
+        raise HTTPException(423, {**SECURE_LOCKED, "message": "Enter your PIN to open the secure folder."})
+    _enforce_retention(p, a)
+    return [_summary(c, a) for c in a.storage.list_conversations(p.org_id, p.user_id, 10_000) if c.secure]
 
 
 # ---- chat --------------------------------------------------------------------------
@@ -210,6 +308,8 @@ class ChatRequest(BaseModel):
     continue_message_id: str | None = None
     # Compare mode: the saved comparison this lane belongs to.
     compare_id: str | None = None
+    # Start a new chat inside the secure folder.
+    secure: bool = False
 
 
 def _history(conv: Conversation) -> list[Message]:
@@ -245,7 +345,8 @@ def _sse_response(gen) -> StreamingResponse:
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principal), a: App = Depends(get_app)):
+async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principal), a: App = Depends(get_app),
+                      ok: bool = Depends(unlocked)):
     try:
         _, model = a.gateway.resolve(body.model)
         a.billing.check(p.org_id, model)
@@ -261,7 +362,7 @@ async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principa
     _enforce_retention(p, a)
 
     if body.continue_message_id:
-        conv, target = _continue_target(body, p, a)
+        conv, target = _continue_target(body, p, a, ok)
         return _sse_response(_continue(conv, target, p, a, model))
 
     # Conversation
@@ -275,9 +376,15 @@ async def chat_stream(body: ChatRequest, p: Principal = Depends(current_principa
         conv = Conversation(id=comparison.id if comparison else new_id("cmp"), org_id=p.org_id,
                             user_id=p.user_id, model_id=model.id)
     elif body.conversation_id:
-        conv = _own_conversation(p, a, body.conversation_id)
+        conv = _own_conversation(p, a, body.conversation_id, ok)
     else:
         conv = Conversation(org_id=p.org_id, user_id=p.user_id, model_id=model.id)
+        if body.secure:
+            # The user reads this chat as it streams, so it needs an unlocked folder.
+            _require_secure_folder(p, a)
+            if not ok:
+                raise HTTPException(423, {**SECURE_LOCKED, "message": "Enter your PIN to start a secure chat."})
+            conv.secure = True
         if body.skill_id:
             skill = _visible_skill(p, a, body.skill_id)
             conv.skill_id, conv.skill_name = skill.id, skill.name
@@ -394,10 +501,10 @@ def _start_payload(ev: Started) -> dict[str, Any]:
     }
 
 
-def _continue_target(body: ChatRequest, p: Principal, a: App) -> tuple[Conversation, StoredMessage]:
+def _continue_target(body: ChatRequest, p: Principal, a: App, ok: bool) -> tuple[Conversation, StoredMessage]:
     if not body.conversation_id:
         raise HTTPException(400, "Continue needs a conversation.")
-    conv = _own_conversation(p, a, body.conversation_id)
+    conv = _own_conversation(p, a, body.conversation_id, ok)
     target = conv.messages[-1] if conv.messages else None
     if not target or target.id != body.continue_message_id or target.role != "assistant" or not target.truncated:
         raise HTTPException(409, "Only the latest reply can be continued, and only if it was cut off.")
@@ -721,7 +828,8 @@ def export_data(p: Principal = Depends(current_principal), a: App = Depends(get_
         "comparisons": [c.model_dump(mode="json") for c in a.storage.list_comparisons(p.org_id, p.user_id, 10_000)],
         "prompt_skills": [s.model_dump(mode="json") for s in a.storage.list_prompt_skills(p.org_id, p.user_id)
                           if s.owner_id == p.user_id],
-        "settings": a.storage.get_settings("user", p.user_id),
+        # The PIN hash stays out of exports.
+        "settings": {k: v for k, v in a.storage.get_settings("user", p.user_id).items() if k != "_secure"},
         "billing_ledger": a.storage.list_ledger(p.org_id, 10_000),
         "note": "Uploaded images are listed by id inside messages; download them from the app.",
     }
@@ -918,6 +1026,7 @@ def usage(days: int = Query(30, ge=1, le=365), p: Principal = Depends(current_pr
             "avg_ttft_ms": int(v["ttft_ms"] / n),
         })
     top = sorted(traces, key=lambda t: -t.response.cost.total_usd)[:5]
+    secure_ids = {c.id for c in a.storage.list_conversations(p.org_id, p.user_id, 10_000) if c.secure}
     return {
         "days": days,
         "daily": [{"date": d, "by_model": dict(v), "total_usd": sum(v.values())} for d, v in daily.items()],
@@ -933,6 +1042,7 @@ def usage(days: int = Query(30, ge=1, le=365), p: Principal = Depends(current_pr
                 "input_tokens": t.response.usage.total_input_tokens,
                 "created_at": t.created_at,
                 "ephemeral": t.ephemeral,
+                "secure": t.conversation_id in secure_ids,
             }
             for t in top
             if t.response.cost.total_usd > 0
@@ -958,6 +1068,7 @@ def _ledger_view(p: Principal, a: App, limit: int = 100) -> list[dict[str, Any]]
     came from and the tokens behind the charge."""
     models = {m.id: m for m in a.gateway.models()}
     titles: dict[str, tuple[str, str] | None] = {}
+    secure_ids: set[str] = set()
 
     def source(trace: Trace) -> tuple[str, str] | None:
         key = trace.conversation_id
@@ -967,7 +1078,9 @@ def _ledger_view(p: Principal, a: App, limit: int = 100) -> list[dict[str, Any]]
                 titles[key] = ("comparison", c.title or "Comparison") if c else None
             else:
                 c2 = a.storage.get_conversation(p.org_id, key)
-                titles[key] = ("chat", c2.title) if c2 else None
+                if c2 and c2.secure:
+                    secure_ids.add(key)  # never show its title here
+                titles[key] = ("chat", "Secure chat" if c2.secure else c2.title) if c2 else None
         return titles[key]
 
     out = []
@@ -984,6 +1097,7 @@ def _ledger_view(p: Principal, a: App, limit: int = 100) -> list[dict[str, Any]]
                     "source_kind": src[0] if src else ("comparison" if t.ephemeral else "chat"),
                     "source_id": t.conversation_id if src else None,
                     "source_title": src[1] if src else "Deleted",
+                    "source_secure": t.conversation_id in secure_ids,
                     "input_tokens": r.usage.total_input_tokens,
                     "output_tokens": r.usage.output_tokens,
                     "cache_read_tokens": r.usage.cache_read_tokens,

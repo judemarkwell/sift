@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Menu } from 'lucide-react'
+import { LockKeyhole, Menu } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { PageHeader, Segmented } from '@/components/ui/controls'
 import { useAppData } from '@/hooks/useAppData'
 import { api } from '@/lib/api'
 import { href } from '@/lib/route'
+import { openSecureChatFromLink } from '@/lib/secure-store'
 import { cn, formatCost, formatDate, formatMs, formatTokens } from '@/lib/utils'
 import type { UsageResponse } from '@/lib/types'
 
@@ -196,6 +197,15 @@ export function UsagePage({ onOpenMenu }: { onOpenMenu: () => void }) {
                         <span className="min-w-0 truncate">
                           {m.ephemeral ? (
                             <span>Comparison run</span>
+                          ) : m.secure ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 text-primary hover:underline"
+                              title="In your secure folder. Opens after you enter your PIN."
+                              onClick={() => void openSecureChatFromLink(m.conversation_id)}
+                            >
+                              <LockKeyhole className="size-3.5" aria-hidden /> Secure chat
+                            </button>
                           ) : (
                             <a className="text-primary hover:underline" href={href({ page: 'chat', id: m.conversation_id })}>
                               Open chat

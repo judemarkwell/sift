@@ -129,6 +129,7 @@ export interface LedgerEntry {
   model_name?: string
   source_kind?: 'chat' | 'comparison'
   source_id?: string | null
+  source_secure?: boolean
   source_title?: string
   input_tokens?: number
   output_tokens?: number
@@ -201,6 +202,7 @@ export interface UsageResponse {
     input_tokens: number
     created_at: string
     ephemeral: boolean
+    secure: boolean
   }[]
 }
 
@@ -316,4 +318,13 @@ export interface ComparisonSummary {
   created_at: string
   total_usd: number
   models: string[]
+}
+
+export interface SecureStatus {
+  enabled: boolean
+  /** Shown in the sidebar: on, or still holding chats after being turned off. */
+  visible: boolean
+  pin_set: boolean
+  unlocked: boolean
+  retry_after_seconds: number
 }

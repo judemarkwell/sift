@@ -25,6 +25,7 @@ from app.skills.builtin import (
     SpendGuardSkill,
 )
 from app.skills.pii.skill import PiiRedactionSkill
+from app.skills.secure_folder import SecureFolderSkill
 
 # Order matters. Before sending: trim first (less to scan), then redact, then
 # estimate cost on what will actually be sent. After: price the reply first,
@@ -36,6 +37,7 @@ SKILLS: list[Skill] = [
     CostMeterSkill(),
     PromptCacheSkill(),
     ResponseScanSkill(),
+    SecureFolderSkill(),  # no request stage; an app feature with skill-style settings
 ]
 SKILL_BY_ID: dict[str, Skill] = {s.manifest.id: s for s in SKILLS}
 

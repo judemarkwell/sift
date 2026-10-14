@@ -65,9 +65,9 @@ def client(fake):
     main.app.dependency_overrides.clear()
 
 
-def stream(client, **body):
+def stream(client, headers=None, **body):
     """POST to the chat stream and return the parsed events."""
-    with client.stream("POST", "/api/chat/stream", json=body) as r:
+    with client.stream("POST", "/api/chat/stream", json=body, headers=headers or {}) as r:
         if r.status_code != 200:
             r.read()
             return r.status_code, r.json()

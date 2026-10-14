@@ -125,6 +125,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/secure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Secure Status */
+        get: operations["secure_status_api_secure_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/secure/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Secure Set Pin */
+        post: operations["secure_set_pin_api_secure_pin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/secure/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Secure Unlock */
+        post: operations["secure_unlock_api_secure_unlock_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/secure/lock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Secure Lock */
+        post: operations["secure_lock_api_secure_lock_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/secure/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Secure Conversations */
+        get: operations["list_secure_conversations_api_secure_conversations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat/stream": {
         parameters: {
             query?: never;
@@ -154,6 +239,42 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/comparisons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Comparisons */
+        get: operations["list_comparisons_api_comparisons_get"];
+        put?: never;
+        /** Create Comparison */
+        post: operations["create_comparison_api_comparisons_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/comparisons/{comparison_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Comparison */
+        get: operations["get_comparison_api_comparisons__comparison_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Comparison */
+        delete: operations["delete_comparison_api_comparisons__comparison_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -512,6 +633,13 @@ export interface components {
             };
             /** Continue Message Id */
             continue_message_id?: string | null;
+            /** Compare Id */
+            compare_id?: string | null;
+            /**
+             * Secure
+             * @default false
+             */
+            secure: boolean;
         };
         /** CheckoutRequest */
         CheckoutRequest: {
@@ -524,6 +652,11 @@ export interface components {
              * @default 1
              */
             seats: number;
+        };
+        /** ComparisonIn */
+        ComparisonIn: {
+            /** Models */
+            models: string[];
         };
         /** ContextBreakdown */
         ContextBreakdown: {
@@ -576,6 +709,11 @@ export interface components {
             skill_name?: string | null;
             /** Skill Note */
             skill_note?: string | null;
+            /**
+             * Secure
+             * @default false
+             */
+            secure: boolean;
         };
         /** ConversationPatch */
         ConversationPatch: {
@@ -583,6 +721,11 @@ export interface components {
             title?: string | null;
             /** Model Id */
             model_id?: string | null;
+            /**
+             * Secure
+             * @description Move into (true) or out of (false) the secure folder
+             */
+            secure?: boolean | null;
         };
         /** ConversationSummary */
         ConversationSummary: {
@@ -603,6 +746,11 @@ export interface components {
             spend_usd: number;
             /** Skill Name */
             skill_name?: string | null;
+            /**
+             * Secure
+             * @default false
+             */
+            secure: boolean;
         };
         /** Cost */
         Cost: {
@@ -750,6 +898,11 @@ export interface components {
             allowed: boolean;
             /** Required Plan */
             required_plan?: string | null;
+        };
+        /** PinIn */
+        PinIn: {
+            /** Pin */
+            pin: string;
         };
         /**
          * PipelineStep
@@ -1143,6 +1296,7 @@ export interface operations {
             query?: never;
             header?: {
                 authorization?: string | null;
+                "x-sift-unlock"?: string | null;
             };
             path: {
                 conv_id: string;
@@ -1176,6 +1330,7 @@ export interface operations {
             query?: never;
             header?: {
                 authorization?: string | null;
+                "x-sift-unlock"?: string | null;
             };
             path: {
                 conv_id: string;
@@ -1207,6 +1362,7 @@ export interface operations {
             query?: never;
             header?: {
                 authorization?: string | null;
+                "x-sift-unlock"?: string | null;
             };
             path: {
                 conv_id: string;
@@ -1244,6 +1400,7 @@ export interface operations {
             query?: never;
             header?: {
                 authorization?: string | null;
+                "x-sift-unlock"?: string | null;
             };
             path: {
                 conv_id: string;
@@ -1277,6 +1434,7 @@ export interface operations {
             query?: never;
             header?: {
                 authorization?: string | null;
+                "x-sift-unlock"?: string | null;
             };
             path: {
                 trace_id: string;
@@ -1305,11 +1463,175 @@ export interface operations {
             };
         };
     };
+    secure_status_api_secure_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-sift-unlock"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    secure_set_pin_api_secure_pin_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PinIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    secure_unlock_api_secure_unlock_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PinIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    secure_lock_api_secure_lock_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_secure_conversations_api_secure_conversations_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-sift-unlock"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     chat_stream_api_chat_stream_post: {
         parameters: {
             query?: never;
             header?: {
                 authorization?: string | null;
+                "x-sift-unlock"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -1358,6 +1680,136 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+        };
+    };
+    list_comparisons_api_comparisons_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_comparison_api_comparisons_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComparisonIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_comparison_api_comparisons__comparison_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                comparison_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_comparison_api_comparisons__comparison_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                comparison_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

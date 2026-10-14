@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { ChatPage } from '@/components/chat/ChatPage'
+import { PinDialog } from '@/components/PinDialog'
 import { ComparePage } from '@/components/pages/ComparePage'
 import { PlansPage } from '@/components/pages/PlansPage'
 import { PrivacyPage } from '@/components/pages/PrivacyPage'
@@ -9,12 +10,20 @@ import { UsagePage } from '@/components/pages/UsagePage'
 import { Sidebar } from '@/components/Sidebar'
 import { AppDataProvider, useAppData } from '@/hooks/useAppData'
 import { useRoute } from '@/lib/route'
+import { onRouteChange, refreshSecureStatus } from '@/lib/secure-store'
 
 function Shell() {
   const route = useRoute()
   const { loadError } = useAppData()
   const [menuOpen, setMenuOpen] = useState(false)
   const openMenu = () => setMenuOpen(true)
+
+  useEffect(() => {
+    void refreshSecureStatus()
+  }, [])
+
+  // Leaving the open secure chat ends access to it.
+  useEffect(() => onRouteChange(route.page, route.id), [route.page, route.id])
 
   useEffect(() => {
     const titles = {
@@ -47,6 +56,7 @@ function Shell() {
   return (
     <div className="flex h-full">
       <Sidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} />
+      <PinDialog />
       <div className="flex min-w-0 flex-1">
         {route.page === 'chat' && <ChatPage conversationId={route.id} onOpenMenu={openMenu} />}
         {route.page === 'compare' && <ComparePage comparisonId={route.id} onOpenMenu={openMenu} />}

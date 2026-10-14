@@ -8,6 +8,7 @@ from app.config import settings
 from app.gateway import Gateway
 from app.providers import build_adapters
 from app.schema import Principal
+from app.secure import SecureFolder
 from app.skills.registry import SKILLS, ResolvedSkill, resolve
 from app.storage.base import Storage
 
@@ -30,6 +31,7 @@ class App:
     def __init__(self, storage: Storage | None = None, adapters=None, default_plan: str | None = None,
                  daily_budget_usd: float | None = None) -> None:
         self.storage = storage or make_storage()
+        self.secure = SecureFolder(self.storage)
         self.billing = Billing(self.storage, MockPayments(), default_plan or settings.default_plan)
         self.gateway = Gateway(
             storage=self.storage,

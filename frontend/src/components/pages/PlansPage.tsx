@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Check, Columns2, CreditCard, MessageSquare, Menu, RefreshCw } from 'lucide-react'
+import { Check, Columns2, CreditCard, LockKeyhole, MessageSquare, Menu, RefreshCw } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, PageHeader, Segmented } from '@/components/ui/controls'
 import { useAppData } from '@/hooks/useAppData'
 import { api } from '@/lib/api'
 import { href } from '@/lib/route'
+import { openSecureChatFromLink } from '@/lib/secure-store'
 import { cn, formatCost, formatDate, formatTokens } from '@/lib/utils'
 import type { BillingResponse, CheckoutSession, LedgerEntry, Plan } from '@/lib/types'
 
@@ -341,7 +342,10 @@ function ActivityRow({ e }: { e: LedgerEntry }) {
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13.5px]">
             <span className="text-muted-foreground">{what}:</span>{' '}
-            <span className={cn(link && 'group-hover:underline')}>{e.source_title ?? 'Unknown'}</span>
+            <span className={cn(link && 'group-hover:underline')}>
+              {e.source_secure && <LockKeyhole className="mr-1 inline size-3.5 -translate-y-px text-primary" aria-hidden />}
+              {e.source_title ?? 'Unknown'}
+            </span>
           </span>
           <span className="block text-xs text-muted-foreground">
             {e.model_name ?? e.description} · {details.join(' · ')} · {time}
@@ -353,7 +357,18 @@ function ActivityRow({ e }: { e: LedgerEntry }) {
     return (
       <li>
         {link ? (
-          <a href={link} className="group -mx-2 flex items-start gap-3 rounded-md px-2 py-2.5 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
+          <a
+            href={link}
+            onClick={
+              e.source_secure && e.source_id
+                ? (ev) => {
+                    ev.preventDefault()
+                    void openSecureChatFromLink(e.source_id!)
+                  }
+                : undefined
+            }
+            title={e.source_secure ? 'In your secure folder. Opens after you enter your PIN.' : undefined}
+            className="group -mx-2 flex items-start gap-3 rounded-md px-2 py-2.5 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
             {body}
           </a>
         ) : (

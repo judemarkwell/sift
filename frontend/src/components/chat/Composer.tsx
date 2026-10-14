@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
 import type { SendOptions } from '@/hooks/useChat'
 import { ApiError, api } from '@/lib/api'
+import { getDraft, setDraft } from '@/lib/drafts'
 import { markClass } from '@/lib/marks'
 import { href } from '@/lib/route'
 import { EXPECTED_OUTPUT_TOKENS, cn, estimateTokens, formatCost, formatTokens } from '@/lib/utils'
@@ -19,6 +20,10 @@ interface Props {
   onSend: (text: string, opts: SendOptions) => Promise<boolean>
   onStop: () => void
   autoFocus?: boolean
+  /** Which chat the draft belongs to ('new' for a new chat). */
+  draftKey: string
+  /** Secure chats keep their draft in memory only. */
+  secure?: boolean
 }
 
 function usePiiScan(text: string) {
@@ -57,10 +62,21 @@ function slashToken(text: string, caret: number): { start: number; query: string
 
 const GROUPS: StyleInfo['group'][] = ['Length', 'Format', 'Purpose', 'Tone']
 
-export function Composer({ messages, model, isStreaming, prefill, onPrefillUsed, onSend, onStop, autoFocus }: Props) {
+export function Composer({
+  messages,
+  model,
+  isStreaming,
+  prefill,
+  onPrefillUsed,
+  onSend,
+  onStop,
+  autoFocus,
+  draftKey,
+  secure = false,
+}: Props) {
   const { styles: allStyles } = useAppData()
-  const [text, setText] = useState('')
-  const [styles, setStyles] = useState<string[]>([])
+  const [text, setText] = useState(() => getDraft(draftKey)?.text ?? '')
+  const [styles, setStyles] = useState<string[]>(() => getDraft(draftKey)?.styles ?? [])
   const [images, setImages] = useState<UploadedImage[]>([])
   const [uploading, setUploading] = useState(0)
   const [quota, setQuota] = useState<ImageQuota | null>(null)
@@ -74,6 +90,11 @@ export function Composer({ messages, model, isStreaming, prefill, onPrefillUsed,
   const fileInput = useRef<HTMLInputElement>(null)
   const scan = usePiiScan(text)
   const styleById = useMemo(() => new Map(allStyles.map((s) => [s.id, s])), [allStyles])
+
+  // Keep the draft as you type; an empty composer (e.g. after sending) clears it.
+  useEffect(() => {
+    setDraft(draftKey, { text, styles }, secure)
+  }, [draftKey, text, styles, secure])
 
   useEffect(() => {
     api.imageQuota().then(setQuota).catch(() => setQuota(null))

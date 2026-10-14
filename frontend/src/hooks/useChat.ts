@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { defaultModelId, useAppData } from '@/hooks/useAppData'
 import { ApiError, api, streamChat, type StreamEvent } from '@/lib/api'
 import { navigate } from '@/lib/route'
+import { openSecureChat } from '@/lib/secure-store'
 import type { ChatMessage, ImageRef, StoredMessage, Trace } from '@/lib/types'
 
 const tempId = () => `tmp_${crypto.randomUUID().slice(0, 8)}`
@@ -17,6 +18,8 @@ export interface SendOptions {
   images?: ImageRef[]
   skillId?: string
   skillValues?: Record<string, string>
+  /** Start this new chat in the secure folder. */
+  secure?: boolean
 }
 
 function blank(role: 'user' | 'assistant', content: string, modelId: string | null): ChatMessage {
@@ -45,6 +48,10 @@ export function useChat(conversationId: string | undefined) {
   const [skillName, setSkillName] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [notFound, setNotFound] = useState(false)
+  // In the secure folder, and whether it's waiting for the PIN to load.
+  const [secure, setSecure] = useState(false)
+  const [locked, setLocked] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   const [sendError, setSendError] = useState<ChatError | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -66,6 +73,8 @@ export function useChat(conversationId: string | undefined) {
       setMessages([])
       setSkillName(null)
       setNotFound(false)
+      setSecure(false)
+      setLocked(false)
       if (models.length) setModelId(defaultModelId(models))
       return
     }
@@ -80,13 +89,25 @@ export function useChat(conversationId: string | undefined) {
         setModelId(conv.model_id)
         setSkillName(conv.skill_name)
         setNotFound(false)
+        setLocked(false)
+        setSecure(conv.secure)
+        // Opening a secure chat closes the folder; only this chat stays open.
+        if (conv.secure) openSecureChat(conv.id)
       })
-      .catch(() => !cancelled && setNotFound(true))
+      .catch((err) => {
+        if (cancelled) return
+        loadedRef.current = undefined
+        setMessages([])
+        if (err instanceof ApiError && err.status === 423) {
+          setLocked(true)
+          setNotFound(false)
+        } else setNotFound(true)
+      })
       .finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
     }
-  }, [conversationId, models])
+  }, [conversationId, models, reloadKey])
 
   const patch = useCallback((id: string, p: Partial<ChatMessage> | ((m: ChatMessage) => Partial<ChatMessage>)) => {
     setMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...(typeof p === 'function' ? p(m) : p) } : m)))
@@ -111,6 +132,10 @@ export function useChat(conversationId: string | undefined) {
             case 'conversation':
               if (!loadedRef.current) {
                 loadedRef.current = ev.conversation_id
+                if (body.secure) {
+                  setSecure(true)
+                  openSecureChat(ev.conversation_id) // before navigating, so access isn't dropped
+                }
                 navigate({ page: 'chat', id: ev.conversation_id }, true)
               }
               if (ev.skill_name) setSkillName(ev.skill_name)
@@ -179,6 +204,7 @@ export function useChat(conversationId: string | undefined) {
         image_ids: images.map((i) => i.id),
         skill_id: opts.skillId,
         skill_values: opts.skillValues,
+        secure: !loadedRef.current && opts.secure ? true : undefined,
       },
       { user: user.id, reply: reply.id },
       () => setMessages((ms) => ms.filter((m) => m.id !== user.id && m.id !== reply.id)),
@@ -225,6 +251,14 @@ export function useChat(conversationId: string | undefined) {
     skillName,
     loading,
     notFound,
+    secure,
+    setSecure,
+    locked,
+    /** Try loading again (after the PIN was entered). */
+    reload: () => {
+      loadedRef.current = undefined
+      setReloadKey((k) => k + 1)
+    },
     isStreaming,
     sendError,
     clearSendError: () => setSendError(null),

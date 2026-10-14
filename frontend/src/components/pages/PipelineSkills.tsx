@@ -3,6 +3,7 @@ import { Lock } from 'lucide-react'
 
 import { Segmented, Switch } from '@/components/ui/controls'
 import { api } from '@/lib/api'
+import { refreshSecureStatus } from '@/lib/secure-store'
 import { ACTION_HELP, ACTION_LABEL, renderMarked } from '@/lib/marks'
 import { href } from '@/lib/route'
 import { cn } from '@/lib/utils'
@@ -34,6 +35,7 @@ export function PipelineSkills() {
     setError(null)
     try {
       setData(await api.patchSkill(id, patch, mode === 'workspace'))
+      if (id === 'secure-folder') void refreshSecureStatus()
       setSaved(true)
       setTimeout(() => setSaved(false), 1600)
     } catch (e) {
@@ -125,7 +127,7 @@ function SkillRow({
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             <h2 className="text-[16px] font-semibold">{m.name}</h2>
             <span className="text-xs text-muted-foreground">
-              {m.category} · {m.stages.map((st) => STAGE_LABEL[st]).join(' and ')}
+              {m.category} · {m.stages.length ? m.stages.map((st) => STAGE_LABEL[st]).join(' and ') : 'app feature, not a request step'}
               {m.can_modify_request && ' · can change what is sent'}
             </span>
             {(lockedEnabled || lockedConfig) && (

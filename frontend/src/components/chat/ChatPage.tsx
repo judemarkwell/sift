@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react'
-import { Download, Menu, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Download, LockKeyhole, LockOpen, Menu, Sparkles } from 'lucide-react'
 
 import { Composer } from '@/components/chat/Composer'
 import { SkillLauncher } from '@/components/chat/SkillLauncher'
@@ -10,7 +10,9 @@ import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
 import { useChat } from '@/hooks/useChat'
 import { api } from '@/lib/api'
-import { href } from '@/lib/route'
+import { href, navigate } from '@/lib/route'
+import { lock, openSecureChat, refreshSecureChats, refreshSecureStatus, requestPin, useSecure } from '@/lib/secure-store'
+import { getUnlockToken } from '@/lib/unlock-token'
 
 const SUGGESTIONS = [
   { text: 'Draft a reply to jane.doe@acme.com confirming Thursday. My cell is (502) 555-0142.', note: 'see PII redaction work' },
@@ -19,8 +21,63 @@ const SUGGESTIONS = [
 ]
 
 export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: string; onOpenMenu: () => void }) {
-  const { models } = useAppData()
+  const { models, refreshConversations } = useAppData()
   const chat = useChat(conversationId)
+  const { status: secureStatus } = useSecure()
+  // A new chat that will start in the secure folder.
+  const [pendingSecure, setPendingSecure] = useState(false)
+  const [secureError, setSecureError] = useState<string | null>(null)
+  useEffect(() => {
+    setPendingSecure(false)
+    setSecureError(null)
+  }, [conversationId])
+  const isSecure = conversationId ? chat.secure : pendingSecure
+  const showSecureToggle = !chat.locked && !chat.notFound && (!!secureStatus?.enabled || chat.secure)
+
+  const toggleSecure = async () => {
+    setSecureError(null)
+    try {
+      if (!conversationId) {
+        if (pendingSecure) {
+          setPendingSecure(false)
+          lock()
+        } else if (await requestPin('Enter your PIN to start a secure chat.')) {
+          openSecureChat('new')
+          setPendingSecure(true)
+        }
+        return
+      }
+      if (!chat.secure) {
+        // Moving in needs no PIN entry, only a PIN to exist.
+        if (!secureStatus?.pin_set && !(await requestPin('Set a PIN for your secure folder.'))) return
+        await api.setConversationSecure(conversationId, true)
+        void refreshConversations()
+        void refreshSecureStatus()
+        if (getUnlockToken()) {
+          chat.setSecure(true)
+          openSecureChat(conversationId)
+          void refreshSecureChats()
+        } else {
+          navigate({ page: 'chat' }) // it's hidden now
+        }
+      } else {
+        await api.setConversationSecure(conversationId, false)
+        chat.setSecure(false)
+        lock()
+        void refreshConversations()
+      }
+    } catch (err) {
+      setSecureError((err as Error).message)
+    }
+  }
+
+  const unlockChat = async () => {
+    if (!conversationId) return
+    if (await requestPin('Enter your PIN to open this chat.')) {
+      openSecureChat(conversationId)
+      chat.reload()
+    }
+  }
   const [prefill, setPrefill] = useState<string | null>(null)
   const [skillFormOpen, setSkillFormOpen] = useState(false)
   const clearPrefill = useCallback(() => setPrefill(null), [])
@@ -54,6 +111,26 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
             </span>
           )}
           <div className="flex-1" />
+          {showSecureToggle && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void toggleSecure()}
+              aria-pressed={isSecure}
+              disabled={chat.isStreaming}
+              className={isSecure ? 'bg-primary-soft text-ink hover:bg-primary-soft' : undefined}
+              title={
+                isSecure
+                  ? 'In your secure folder. Click to move it back to your chats.'
+                  : conversationId
+                    ? 'Move to your secure folder, hidden behind your PIN'
+                    : 'Start this chat in your secure folder'
+              }
+            >
+              {isSecure ? <LockKeyhole className="text-primary" /> : <LockOpen />}
+              <span className="hidden sm:inline">{isSecure ? 'Secure' : conversationId ? 'Move to secure' : 'Secure chat'}</span>
+            </Button>
+          )}
           {conversationId && chat.messages.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => void exportReport()} title="Download this conversation as a transparency report">
               <Download /> <span className="hidden sm:inline">Report</span>
@@ -62,7 +139,16 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
         </header>
 
         <div className="flex-1 overflow-y-auto">
-          {chat.notFound ? (
+          {chat.locked ? (
+            <div className="mx-auto max-w-[36rem] px-6 pt-24 text-center">
+              <LockKeyhole className="mx-auto size-6 text-primary" aria-hidden />
+              <p className="mt-3 text-lg font-semibold">This chat is in your secure folder</p>
+              <p className="mt-2 text-sm text-muted-foreground">Enter your PIN to open it.</p>
+              <Button className="mt-5" onClick={() => void unlockChat()}>
+                Enter PIN
+              </Button>
+            </div>
+          ) : chat.notFound ? (
             <div className="mx-auto max-w-[36rem] px-6 pt-24 text-center">
               <p className="text-lg font-semibold">This chat doesn't exist anymore</p>
               <p className="mt-2 text-sm text-muted-foreground">
@@ -96,7 +182,7 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
               </ul>
                 </>
               )}
-              <SkillLauncher onStart={chat.send} onOpenChange={setSkillFormOpen} />
+              <SkillLauncher onStart={(text, opts) => chat.send(text, { ...opts, secure: pendingSecure })} onOpenChange={setSkillFormOpen} />
             </div>
           ) : (
             <MessageList
@@ -110,6 +196,13 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
           )}
         </div>
 
+        {secureError && (
+          <div className="mx-auto w-full max-w-[44rem] px-4 sm:px-6">
+            <p role="alert" className="mb-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
+              {secureError}
+            </p>
+          </div>
+        )}
         {chat.sendError && (
           <div className="mx-auto w-full max-w-[44rem] px-4 sm:px-6">
             <div role="alert" className="mb-2 flex items-start justify-between gap-3 rounded-lg border border-cost/40 bg-cost/5 px-3 py-2 text-[13px]">
@@ -128,17 +221,21 @@ export function ChatPage({ conversationId, onOpenMenu }: { conversationId?: stri
           </div>
         )}
 
+        {!chat.locked && (
         <Composer
           key={conversationId ?? 'new'}
+          draftKey={conversationId ?? 'new'}
+          secure={isSecure}
           messages={chat.messages}
           model={model}
           isStreaming={chat.isStreaming}
           prefill={prefill}
           onPrefillUsed={clearPrefill}
-          onSend={chat.send}
+          onSend={(text, opts) => chat.send(text, { ...opts, secure: pendingSecure })}
           onStop={chat.stop}
           autoFocus
         />
+        )}
       </main>
 
       {chat.selected && (

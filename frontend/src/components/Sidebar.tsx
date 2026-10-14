@@ -1,8 +1,24 @@
-import { BarChart3, Columns2, CreditCard, Monitor, Moon, Plus, Shield, Sparkles, Sun, X } from 'lucide-react'
+import {
+  BarChart3,
+  ChevronRight,
+  Columns2,
+  CreditCard,
+  Lock,
+  LockKeyhole,
+  Monitor,
+  Moon,
+  Plus,
+  Shield,
+  Sparkles,
+  Sun,
+  X,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useAppData } from '@/hooks/useAppData'
-import { href, type Route } from '@/lib/route'
+import { href, navigate, type Route } from '@/lib/route'
+import { collapseFolder, expandFolder, lock, openSecureChat, useSecure } from '@/lib/secure-store'
+import type { ConversationSummary } from '@/lib/types'
 import { useTheme, type Theme } from '@/lib/theme'
 import { cn, formatCost } from '@/lib/utils'
 
@@ -20,8 +36,100 @@ const NAV = [
   { page: 'privacy', label: 'Privacy & data', icon: Shield },
 ] as const
 
+function ChatRow({
+  c,
+  active,
+  onClick,
+  href: to,
+}: {
+  c: ConversationSummary
+  active: boolean
+  onClick: (e: React.MouseEvent) => void
+  href: string
+}) {
+  return (
+    <li>
+      <a
+        href={to}
+        onClick={onClick}
+        aria-current={active ? 'page' : undefined}
+        className={cn(
+          'flex items-baseline justify-between gap-3 rounded-md px-2.5 py-1.5 text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring',
+          active && 'bg-muted font-medium',
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          {c.skill_name && <Sparkles className="size-3.5 shrink-0 text-primary" aria-label="Skill chat" />}
+          <span className="truncate">{c.title}</span>
+        </span>
+        {c.spend_usd > 0 && <span className="shrink-0 text-xs font-normal text-cost">{formatCost(c.spend_usd)}</span>}
+      </a>
+    </li>
+  )
+}
+
+/** The PIN-protected folder at the top of the chat list. */
+function SecureFolder({ route, onClose }: { route: Route; onClose: () => void }) {
+  const { status, expanded, chats } = useSecure()
+  if (!status?.visible) return null
+
+  const toggle = () => (expanded ? collapseFolder() : void expandFolder())
+
+  return (
+    <li className="mb-1">
+      <div className="flex items-center">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-90')} />
+          <LockKeyhole className="size-3.5 shrink-0 text-primary" />
+          <span className="font-medium">Secure</span>
+          {!status.pin_set && <span className="text-xs text-muted-foreground">· set up</span>}
+        </button>
+        {expanded && (
+          <button
+            type="button"
+            onClick={lock}
+            className="mr-1 flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-ink"
+            title="Lock the secure folder"
+          >
+            <Lock className="size-3" /> Lock
+          </button>
+        )}
+      </div>
+      {expanded && (
+        <ul className="ml-4 border-l border-border pl-1.5">
+          {chats.length === 0 && (
+            <li className="px-2.5 py-1.5 text-[13px] text-muted-foreground">
+              Empty. Use the lock button on a chat to move it here.
+            </li>
+          )}
+          {chats.map((c) => (
+            <ChatRow
+              key={c.id}
+              c={c}
+              active={route.page === 'chat' && route.id === c.id}
+              href={href({ page: 'chat', id: c.id })}
+              onClick={(e) => {
+                e.preventDefault()
+                openSecureChat(c.id) // the folder closes; this chat stays open
+                navigate({ page: 'chat', id: c.id })
+                onClose()
+              }}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
 export function Sidebar({ route, open, onClose }: Props) {
   const { conversations, me } = useAppData()
+  const secure = useSecure()
   const [theme, setTheme] = useTheme()
 
   return (
@@ -71,31 +179,19 @@ export function Sidebar({ route, open, onClose }: Props) {
 
         <p className="mt-5 px-5 pb-1.5 text-xs font-medium text-muted-foreground">Chats</p>
         <ul className="flex-1 overflow-y-auto px-3 pb-3">
-          {conversations.length === 0 && (
+          <SecureFolder route={route} onClose={onClose} />
+          {conversations.length === 0 && !secure.status?.pin_set && (
             <li className="px-2.5 py-1 text-[13px] text-muted-foreground">Your chats will appear here.</li>
           )}
-          {conversations.map((c) => {
-            const active = route.page === 'chat' && route.id === c.id
-            return (
-              <li key={c.id}>
-                <a
-                  href={href({ page: 'chat', id: c.id })}
-                  onClick={onClose}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'flex items-baseline justify-between gap-3 rounded-md px-2.5 py-1.5 text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring',
-                    active && 'bg-muted font-medium',
-                  )}
-                >
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    {c.skill_name && <Sparkles className="size-3.5 shrink-0 text-primary" aria-label="Skill chat" />}
-                    <span className="truncate">{c.title}</span>
-                  </span>
-                  {c.spend_usd > 0 && <span className="shrink-0 text-xs font-normal text-cost">{formatCost(c.spend_usd)}</span>}
-                </a>
-              </li>
-            )
-          })}
+          {conversations.map((c) => (
+            <ChatRow
+              key={c.id}
+              c={c}
+              active={route.page === 'chat' && route.id === c.id}
+              href={href({ page: 'chat', id: c.id })}
+              onClick={onClose}
+            />
+          ))}
         </ul>
 
         <div className="flex items-center justify-between border-t border-border px-5 py-2.5">
